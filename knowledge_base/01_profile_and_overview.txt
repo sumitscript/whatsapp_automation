@@ -6,7 +6,7 @@ Current Status: Aspiring Software Engineer / Open to Work (Full-time, Internship
 Education: B.Tech. - CSE, PIT, Parul University (2022 – 2026), CGPA: 7.52 / 10
 Location: India (Mumbai Metropolitan Region / Vadodara, Gujarat · Open to On-site, Hybrid, Remote)
 
-Contact & Profiles:
+Contact & Social Links:
 - Website / Portfolio: https://www.sumitscript.com
 - GitHub: https://github.com/sumitscript
 - LinkedIn: https://www.linkedin.com/in/sumitscript
@@ -15,8 +15,9 @@ Contact & Profiles:
 Brief Summary:
 Aspiring software engineer with hands-on experience in full-stack development and AI integration. Passionate about building scalable web applications and automation tools. Proven track record of architecting internal productivity platforms, automating high-throughput data pipelines, and building low-latency AI assistants. Seeking to contribute to impactful tech-driven solutions while growing in a dynamic organization.
 
-Core Highlights & Specializations:
-- Internal Tools & Automation Engineering: Architected and deployed production platforms at Exxat handling 85,000+ records, cutting report generation from 6–8 hours to under 5 minutes.
-- Full-Stack & Systems Architecture: Proficient across ReactJS, Next.js, TypeScript, NodeJS, Express.js, FastAPI, Flask, and microservices architectures.
-- Applied AI & Combinatorial Optimization: Developed RAG pipelines, WhatsApp AI assistants with 90% latency reduction, and ML decision support systems for railway traffic optimization (Konkan Railway).
-- High Security Standards: Pioneer in on-device processing and machine-bound encryption (Windows DPAPI) to ensure enterprise data isolation and prevent sensitive data leaks.
+Core Strengths & Specializations:
+- Software Development & Automation: Developing high-performance data processing pipelines and internal services.
+- Data Structures & Algorithms: Strong problem-solving background in Java and Python, applying complex algorithms (e.g., KMP, Levenshtein Distance) to real-world software and bioinformatics.
+- Applied AI & Retrieval-Augmented Generation (RAG): Architecting local and enterprise LLM applications using LangChain, Ollama, ChromaDB, semantic caching, and cross-encoder reranking.
+- System Security & Architecture: Implementing machine-bound encryption (Windows DPAPI) for sensitive secrets and identifying API vulnerabilities (excessive data exposure, broken access control).
+

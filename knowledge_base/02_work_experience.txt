@@ -1,22 +1,23 @@
 # Sumit Soni - Professional Work Experience
 
 1. Exxat
-Role: Product Analyst (Internal Tools & Automation)
-Duration: 03/2026 – Present
-Location: Vadodara, India (On-site)
-Key Contributions & Metrics:
-- Productivity Platform Architecture: Single-handedly architected, developed, deployed, and managed an internal productivity platform using Next.js, TypeScript, ExcelJS, and MongoDB, which is now adopted team-wide for daily operational workflows.
-- High-Throughput Automated Data Pipelines: Engineered automated data processing pipelines handling 85,000+ records across 9 distinct datasets, drastically cutting report generation turnaround time from 6–8 hours to under 5 minutes across 23 recurring business reports.
-- On-Device Security & Data Isolation: Enforced an on-device data processing architecture to prevent sensitive customer and company data from ever leaving local devices, maximizing operational security and strict isolation from external untrusted environments.
-- Support Chat Assistant: Designed and deployed a specialized AI support chat assistant currently powering 3,161+ real-world customer interactions.
-- Database & Query Optimization: Built an internal service for unified user and tenant lookups across multiple databases and collections using email ID and tenant ID; eliminated N+1 queries and introduced in-memory memoization to remove redundant database calls.
-- Executive Recognition: Recognized by senior leadership within just 2 months of joining Exxat, and invited to formally present the internal tooling platform to C-suite executive representatives.
+Role: Product Analyst — Software Development & Automation
+Type: Full-time
+Duration: March 2026 – Present (Vadodara, Gujarat, India · On-site)
+Key Responsibilities & Achievements:
+- Data Aggregation Pipeline: Architected and developed a data aggregation pipeline processing 15 MongoDB exports into a master report, slashing generation time by 99%.
+- Unified Internal Lookup Service: Built and maintained an internal service for unified user and tenant lookups across multiple databases and collections using email ID and tenant ID.
+- Database & Query Optimization: Optimized data retrieval by systematically eliminating N+1 queries and implementing in-memory memoization to drastically reduce redundant database calls.
+- Standalone Service Security: Distributed internal services as standalone executables secured via machine-bound encryption (Windows DPAPI / CryptProtectData), ensuring sensitive credentials, SDK tokens, and configs remain protected at rest and cannot be extracted or used on unauthorized machines.
+Technologies Used: JavaScript, MongoDB, Docker, Low-Level Design (LLD), REST APIs, Software Development & Automation.
 
 2. iamneo - An NIIT Venture
 Role: Trainee
-Duration: 05/2025 – 06/2025
-Location: Vadodara, India (On-site)
-Key Contributions & Metrics:
-- Completed intensive technical training in core Java development, advanced data structures, algorithmic design, and Object-Oriented Programming (OOP) paradigms.
-- Architected and engineered the "NeoAI - iamNeo Support Genie", a full-scale AI assistant automating real-time customer and student support over WhatsApp.
-- Designed a microservices architecture pairing Node.js with FastAPI, achieving a 90% reduction in response latency and a 10x scalability enhancement under heavy traffic.
+Type: Trainee / Internship
+Duration: May 2025 – June 2025 (Vadodara, Gujarat, India · On-site)
+Key Responsibilities & Achievements:
+- Underwent intensive deep-skilling and training in Java development, advanced algorithms, data structures, and Object-Oriented Programming (OOP).
+- Strengthened problem-solving speed, general aptitude, and professional software engineering methodologies.
+- Designed and engineered an AI-powered WhatsApp Support Genie/Bot for iamneo during this period, leveraging local LLMs (Mistral 7B via Ollama), embeddings (nomic-embed-text), LangChain, and ChromaDB vector retrieval with strict grounding and out-of-scope fallback handling.
+Technologies Used: Java Development, Algorithms, Data Structures, Object-Oriented Programming (OOP), Soft Skills, General Aptitude, Python, Ollama, LangChain.
+
