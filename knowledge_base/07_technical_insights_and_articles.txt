@@ -1,0 +1,22 @@
+# Sumit Soni - Technical Insights, Research & Articles
+
+1. Machine-Bound Encryption & Application Secrets Security
+- Core Problem: Distributing an internal service or application as a standalone executable (`.exe`) without a heavy CI/CD or server deployment introduces the risk that binaries or local config files can be copied to unauthorized systems, where embedded credentials/tokens might be extracted.
+- Engineering Solution: Explored machine-bound encryption on Windows using Data Protection API (DPAPI) via `CryptProtectData`. By tying decryption to the user/machine security context, copied files cannot be decrypted on another system or by an unauthorized user account.
+- Security Key Takeaways:
+  - Encryption at Rest: Sensitive tokens and configs must be encrypted when stored on disk.
+  - Machine/User Binding: Decryption must be strictly bound to the authenticated runtime environment.
+  - Least Privilege & Defense in Depth: Combine encryption with short-lived tokens, scoped credentials, and credential brokers rather than distributing long-lived global secrets.
+  - Compliance: Essential when safeguarding data under regulatory frameworks like HIPAA and FERPA.
+
+2. API Security & Responsible Vulnerability Disclosure (Excessive Data Exposure & Broken Access Control)
+- Discovery: While studying Low-Level Design (LLD) on a major educational platform, Sumit audited network requests and DevTools logs, discovering an excessive data exposure vulnerability in their backend GraphQL API.
+- Impact:
+  - The API was returning superadmin personally identifiable information (PII), internal user details, and cross-user metadata that was not rendered or needed by the frontend UI.
+  - The GraphQL schema leaked 183 mutation names (write operations like `createRole`, `deleteArticle`, `updateTicket`, `toggleRolePermission`), expanding the attack surface.
+- Lesson: Security bugs often arise from simple API design oversights where endpoints return full database objects rather than stripped DTOs (Data Transfer Objects). Always enforce strict API response schemas and server-side authorization checks.
+
+3. Algorithmic Problem Solving (LeetCode Learn-in-Public Highlights)
+- Two Sum: Analyzed Brute Force (O(n^2)), Two-Pointer after sorting (O(n log n)), and optimal Hash Table lookup (O(n) time, O(n) space) for single-pass complement discovery.
+- Valid Palindrome (LeetCode 125): Compared string mutation vs. two-pointer in-place traversal with character filtering for optimal O(1) space complexity.
+- Valid Parentheses (LeetCode 20): Implemented stack-based matching with bracket character validation to guarantee LIFO matching rules.

@@ -1,0 +1,33 @@
+# Sumit Soni - Certifications, Honors & Achievements
+
+1. NPTEL (SWAYAM) - Introduction to Internet of Things
+- Recognition: Top 5% Topper Nationwide
+- Certification Grade: Elite + Silver medal (Score: 85%)
+- Honors: Received official "Token of Appreciation for Setting a Benchmark of Excellence" from Parul University and NPTEL.
+- Focus: IoT architecture, sensors, networking protocols, edge and cloud communication.
+
+2. Samsung Solve for Tomorrow (SFT 2025)
+- Achievement: Ranked in Top 100 Nationwide in India
+- Competition: Samsung Solve for Tomorrow National Innovation Challenge
+- Initiative: Designed a specialized digital tool and platform focused on mental wellness, motivation, and productivity support for students and young adults.
+
+3. 6th Hackathon Sharda University (Finalist / Team NPM_BUG)
+- Project: Predictive Modelling for GNIDA's Developmental Strategies (PMGD)
+- Domain: Smart Cities, AI-Driven Urban Planning, Sustainable Land Allocation.
+- Teammates: Aditya Patil, Jay Likhar, Suryansh Raghuwanshi, Sumit Soni.
+
+4. Android App's Development Masterclass - Build 2 Apps (Java)
+- Issuing Organization: Udemy
+- Date of Issue: January 2025
+- Credential ID: UC-3e3dbd6a-7453-4ac0-9296-410ebf7e083e
+- Focus: Android Studio, Java for Android, UI layouts, SQLite persistence, activity lifecycles.
+
+5. Mobile App Development (MAD) Micro-Course
+- Issuing Organization: Udemy
+- Description: Completed intensive coursework in mobile app architecture and development practices following academic milestones.
+
+6. 30 Days #CodeHostage Public Learning Challenge
+- A public technical challenge documenting 30 days of continuous learning and implementation across the MERN stack:
+  - Deep-dive into HTML5 semantics, SEO meta tags, and structured elements.
+  - Comprehensive CSS3 mastery: Box model, display properties, positioning (static, relative, absolute, fixed, sticky), floats, clear, overflow, units (px, rem, em, vw, vh), 2D transforms, transitions, and keyframe animations.
+  - Hands-on projects built: Responsive Recipe Website, Custom Interactive Resume with semantic FAQ details, Form validation systems, and layout deconstructions.

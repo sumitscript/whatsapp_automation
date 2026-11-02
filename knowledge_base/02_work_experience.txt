@@ -1,0 +1,22 @@
+# Sumit Soni - Professional Work Experience
+
+1. Exxat
+Role: Product Analyst — Software Development & Automation
+Type: Full-time
+Duration: March 2026 – Present (Vadodara, Gujarat, India · On-site)
+Key Responsibilities & Achievements:
+- Data Aggregation Pipeline: Architected and developed a data aggregation pipeline processing 15 MongoDB exports into a master report, slashing generation time by 99%.
+- Unified Internal Lookup Service: Built and maintained an internal service for unified user and tenant lookups across multiple databases and collections using email ID and tenant ID.
+- Database & Query Optimization: Optimized data retrieval by systematically eliminating N+1 queries and implementing in-memory memoization to drastically reduce redundant database calls.
+- Standalone Service Security: Distributed internal services as standalone executables secured via machine-bound encryption (Windows DPAPI / CryptProtectData), ensuring sensitive credentials, SDK tokens, and configs remain protected at rest and cannot be extracted or used on unauthorized machines.
+Technologies Used: JavaScript, MongoDB, Docker, Low-Level Design (LLD), REST APIs, Software Development & Automation.
+
+2. iamneo - An NIIT Venture
+Role: Trainee
+Type: Trainee / Internship
+Duration: May 2025 – June 2025 (Vadodara, Gujarat, India · On-site)
+Key Responsibilities & Achievements:
+- Underwent intensive deep-skilling and training in Java development, advanced algorithms, data structures, and Object-Oriented Programming (OOP).
+- Strengthened problem-solving speed, general aptitude, and professional software engineering methodologies.
+- Designed and engineered an AI-powered WhatsApp Support Genie/Bot for iamneo during this period, leveraging local LLMs (Mistral 7B via Ollama), embeddings (nomic-embed-text), LangChain, and ChromaDB vector retrieval with strict grounding and out-of-scope fallback handling.
+Technologies Used: Java Development, Algorithms, Data Structures, Object-Oriented Programming (OOP), Soft Skills, General Aptitude, Python, Ollama, LangChain.

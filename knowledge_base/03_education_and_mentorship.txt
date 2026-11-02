@@ -1,0 +1,16 @@
+# Sumit Soni - Education & Mentorship
+
+Education:
+Institution: Parul University
+Degree: Bachelor of Technology (BTech) in Computer Science
+Duration: 2022 – Present
+Location: Vadodara, Gujarat, India
+Key Coursework: Data Structures & Algorithms, Object-Oriented Programming, Database Management Systems, Operating Systems, Web Development, Mobile App Development, Internet of Things (IoT).
+
+Academic Mentorship & Guidance:
+Sumit has been guided and mentored by respected faculty and mentors throughout his academic and engineering journey:
+- Suraj Mourya Sir: Key guide and mentor for DSA, algorithmic problem solving, software development projects, and technical excellence.
+- N Narasimha Pillai Sir: Guide and mentor across major software and algorithmic challenges (including the DNA Sequence Matcher, Trainerconnect, and Computer Vision projects).
+- Maksud Vahora Sir: Faculty mentor supporting engineering milestones and innovation initiatives.
+- Mohammad Abrar M Sir: Training and placement mentor supporting professional deep skilling and impact training.
+- Love Babbar bhaiya: Mentor for Web Development, CSS foundations, and full-stack concepts during early engineering challenges.

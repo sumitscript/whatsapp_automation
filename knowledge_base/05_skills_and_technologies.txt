@@ -1,0 +1,28 @@
+# Sumit Soni - Technical Skills & Stack
+
+Programming Languages:
+- Java: Core Java, Object-Oriented Programming (OOP), Multithreading, Algorithms, Android development.
+- Python: FastAPI, Flask, OpenCV, MediaPipe, LangChain, Sentence-Transformers, Scripting, Automation.
+- JavaScript / TypeScript: Node.js, Next.js, React, Express, modern ES6+ syntax, DOM manipulation.
+- SQL & Query Languages: Relational queries, schema design, GraphQL schema and mutation querying.
+- Web Foundations: HTML5, Semantic Markup, CSS3 (Flexbox, Grid, 2D Transforms, Transitions, Keyframe Animations, Box Model).
+
+Frameworks & Libraries:
+- Backend & APIs: FastAPI, Flask, Node.js, Express, Uvicorn, RESTful API design.
+- Frontend: Next.js, React, HTML5, CSS3, Tailwind / responsive design.
+- AI & LLM Engineering: LangChain, Ollama, ChromaDB, HuggingFace Sentence-Transformers (Cross-Encoder rerankers), RAG pipeline design, Semantic Caching.
+- Computer Vision: OpenCV, MediaPipe.
+
+Databases & Storage:
+- NoSQL: MongoDB (Aggregation pipelines, index optimization, multi-collection lookups).
+- Vector Databases: ChromaDB (embeddings storage, cosine similarity search).
+- Relational / Embedded: SQLite, MySQL.
+
+System Design & Architecture:
+- Low-Level Design (LLD): Clean OOP architecture, modular service contracts, design patterns, separation of concerns.
+- Performance & Query Optimization: N+1 query elimination, in-memory memoization, caching layers, batching exports.
+- Security & Secrets Management: Machine-bound encryption via Windows DPAPI (`CryptProtectData`), encryption at rest, least-privilege scoping, credential brokering.
+- Application Security (AppSec): Network inspection, DevTools traffic debugging, GraphQL write mutation auditing, excessive data exposure prevention, broken access control discovery.
+
+DevOps & Developer Tools:
+- Docker, Git, GitHub, Visual Studio Code (Extension Development), Linux / Bash, Windows PowerShell, Postman / Thunder Client.

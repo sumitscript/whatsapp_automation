@@ -1,0 +1,22 @@
+# Sumit Soni - Profile & Overview
+
+Full Name: Sumit Soni
+Professional Handle / Username: sumitscript
+Current Status: Open to Work / Seeking Job and Internship Opportunities
+Target Domains: Data Structures and Algorithms (DSA), Java Development, Python, JavaScript, Low-Level Design (LLD), Generative AI & Automation
+Location: Mumbai Metropolitan Region / Vadodara, Gujarat, India (Open to On-site, Hybrid, and Remote roles)
+
+Contact & Social Links:
+- Website / Portfolio: https://www.sumitscript.com
+- GitHub: https://github.com/sumitscript
+- LinkedIn: https://www.linkedin.com/in/sumitscript
+- VS Code Marketplace Publisher: SumitScript (https://marketplace.visualstudio.com/publishers/SumitScript)
+
+Professional Summary:
+Sumit Soni (sumitscript) is a passionate software developer and computer science student specializing in backend development, automation, and applied AI. He has hands-on industry experience building scalable data pipelines, internal microservices, and automated developer tooling. Sumit combines strong fundamentals in Data Structures and Algorithms with practical engineering in Python, Java, JavaScript, and modern AI/LLM frameworks like LangChain, Ollama, and ChromaDB.
+
+Core Strengths & Specializations:
+- Software Development & Automation: Developing high-performance data processing pipelines and internal services.
+- Data Structures & Algorithms: Strong problem-solving background in Java and Python, applying complex algorithms (e.g., KMP, Levenshtein Distance) to real-world software and bioinformatics.
+- Applied AI & Retrieval-Augmented Generation (RAG): Architecting local and enterprise LLM applications using LangChain, Ollama, ChromaDB, semantic caching, and cross-encoder reranking.
+- System Security & Architecture: Implementing machine-bound encryption (Windows DPAPI) for sensitive secrets and identifying API vulnerabilities (excessive data exposure, broken access control).

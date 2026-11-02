@@ -1,0 +1,63 @@
+# Sumit Soni - Projects Portfolio
+
+1. Faahhh Terminal Sound (VS Code Extension)
+- Publisher: SumitScript (Published on VS Code Marketplace & VsixHub)
+- Marketplace Identifier: SumitScript.faahhh-terminal-sound
+- Links: 
+  - VS Code Marketplace: https://marketplace.visualstudio.com/items?itemName=SumitScript.faahhh-terminal-sound
+  - VsixHub: https://www.vsixhub.com/publisher/38999/
+- Description: A lightweight, professional audio notification extension for Visual Studio Code that provides instant acoustic feedback for terminal executions, build tasks, and debugger states. When errors occur or builds finish, it plays a custom notification sound (such as the viral "faaaahhh" sound or any custom audio).
+- Technical Highlights & Features:
+  - Bring your own sound: Point to any custom `.wav` or `.mp3` file on the local machine.
+  - Fully customizable volume (0–100) and configurable delay before audio playback.
+  - Flexible keyword triggers: Monitors terminal output for keywords like error, warning, crash, exception, failed, panic, etc.
+  - Debounced instant playback: Prevents sound storms by debouncing rapid bursts of terminal errors.
+  - Cross-platform: Fully compatible across Windows, macOS, and Linux.
+  - Zero npm dependencies: Built with native capabilities to ensure near-zero latency and editor performance.
+
+2. AI-Powered WhatsApp Automation & Support Genie (RAG Pipeline)
+- Repository: https://github.com/sumitscript/whatsapp_automation
+- Description: An end-to-end automated WhatsApp assistant using local AI and Retrieval-Augmented Generation (RAG) to provide grounded answers to user inquiries.
+- Technical Stack & Architecture:
+  - Frontend / WhatsApp Client: `whatsapp-web.js` (Node.js) with headless Chrome automation and QR authentication.
+  - LLM Service: Local inference with `Mistral:7b-instruct-v0.3-q3_K_M` running via Ollama.
+  - Vector Embeddings: `nomic-embed-text:v1.5` running locally via Ollama.
+  - Vectorstore: ChromaDB for local persistent document storage and semantic vector retrieval.
+  - Reranker: Cross-Encoder reranking model (`cross-encoder/ms-marco-MiniLM-L-6-v2`) to re-score top candidate chunks for maximum precision.
+  - Backend API: Python (FastAPI/Uvicorn) with in-memory semantic query caching for sub-second repeat responses.
+  - Out-of-Scope Handling: Strict prompt boundaries ensuring the bot politely acknowledges when requested information is outside its knowledge base rather than hallucinating.
+
+3. DNA Sequence Matcher (Bioinformatics & Next.js)
+- Description: An algorithmic web platform developed as an impact training challenge to match biological DNA sequences across multiple species, delivering both exact matches and similarity percentages.
+- Technical Implementation:
+  - Knuth-Morris-Pratt (KMP) Algorithm: Utilized LPS (Longest Prefix Suffix) preprocessing to perform fast exact substring matching on long sequences (~156,000 characters) without redundant comparisons, beating brute-force search.
+  - Levenshtein Distance Algorithm: Computed minimum edit distance (insertions, deletions, substitutions) to calculate accurate percentage similarities when exact matches do not exist.
+  - Tech Stack: Next.js frontend, MongoDB for sequence data storage, and custom algorithmic implementations.
+
+4. Hand Gesture-Controlled Image Viewer (Computer Vision)
+- Description: A touchless, hand gesture-controlled image viewer that lets users manipulate visual assets without touching keyboard or mouse.
+- Technical Implementation:
+  - Built using Python, OpenCV, and MediaPipe for real-time hand landmark detection and tracking.
+  - Pinch-to-zoom gesture controls image scaling smoothly in real time.
+  - Extended with swipe gestures for navigating across images and finger-tracking for virtual cursor control.
+
+5. Trainerconnect
+- Description: A comprehensive marketplace web application connecting fitness, language, and skill-based trainers with clients.
+- Technical Implementation:
+  - Built with HTML5, CSS3, JavaScript, Python (Flask), and MongoDB.
+  - Included dynamic filtering based on location, skill categories, and trainer availability.
+  - Built-in customer review and testimonial modules for trainer verification.
+
+6. ViralWhisper
+- Repository: https://github.com/sumitscript/ViralWhisper
+- Description: An AI-powered social engagement tool designed for founders and creators to discover relevant discussions via keyword monitoring and draft contextual, high-value replies using local Ollama LLMs.
+
+7. PMGD - Predictive Modelling for GNIDA's Developmental Strategies (Smart City Hackathon)
+- Event: 6th Hackathon Sharda University (Team NPM_BUG)
+- Description: AI-powered urban planning and sustainable development solution for Greater Noida Industrial Development Authority (GNIDA).
+- Features: Smart land allocation, environmental impact assessment, data-driven infrastructure planning, and AI predictive analytics for sustainable urban expansion.
+
+8. Personal Portfolio Website
+- Domain: https://www.sumitscript.com
+- Repository: https://github.com/sumitscript/Portfolio
+- Description: Custom-designed developer portfolio showcasing technical projects, blog writeups, engineering background, and contact details.
