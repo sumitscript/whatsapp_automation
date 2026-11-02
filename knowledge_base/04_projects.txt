@@ -1,63 +1,59 @@
 # Sumit Soni - Projects Portfolio
 
-1. Faahhh Terminal Sound (VS Code Extension)
+1. NeoAI - iamNeo Support Genie
+- Description: Developed a scalable AI assistant that automates user and student conversations seamlessly on WhatsApp.
+- Architecture & Engineering:
+  - Engineered a high-performance microservices architecture coupling FastAPI (Python) and Node.js (`whatsapp-web.js`), significantly boosting response times and gracefully handling high concurrent traffic loads.
+  - Implemented an advanced Retrieval-Augmented Generation (RAG) pipeline to generate accurate, context-grounded, data-driven responses from private enterprise knowledge bases.
+  - Achieved a 90% reduction in response latency and demonstrated a 10x improvement in system scalability, validated by strong business interest.
+
+2. AI-Powered Precise Train Traffic Control System
+- Target Network: Konkan Railway network
+- Problem Domain: Large-scale combinatorial optimization problem in railway traffic management.
+- Engineering & Implementation:
+  - Engineered and backtested a comprehensive AI-powered traffic control system designed to solve complex railway dispatching and routing challenges.
+  - Developed a robust full-stack solution featuring a React + TypeScript frontend for real-time monitoring and a Flask (Python) backend housing the core machine learning optimization model.
+  - Provided intelligent, automated decision support for train controllers, enabling real-time optimization of train precedence, dynamic route planning, and conflict resolution with superior accuracy and scalability.
+  - Demonstrated clear operational viability with key performance indicators (KPIs) focused on maximizing section throughput and driving significant improvements in on-time performance.
+
+3. Exxat Internal Productivity & Automation Platform
+- Stack: Next.js, TypeScript, ExcelJS, MongoDB
+- Description: Single-handedly architected, developed, deployed, and managed an enterprise productivity tool adopted team-wide for daily operations.
+- Key Metrics: Automated pipelines processing 85,000+ records across 9 datasets, reducing report compilation from 6–8 hours to under 5 minutes across 23 recurring reports. Built an on-device support chat assistant powering 3,161+ interactions.
+
+4. Covid Helpdesk Website
+- Impact: Featured in leading newspaper *Hindustan News* for delivering critical public support and community information during the pandemic.
+- Description: Real-time community resource and helpdesk portal providing emergency contact information, hospital availability, and verified resources.
+
+5. Faahhh Terminal Sound (VS Code Extension)
 - Publisher: SumitScript (Published on VS Code Marketplace & VsixHub)
-- Marketplace Identifier: SumitScript.faahhh-terminal-sound
-- Links: 
-  - VS Code Marketplace: https://marketplace.visualstudio.com/items?itemName=SumitScript.faahhh-terminal-sound
+- Marketplace ID: SumitScript.faahhh-terminal-sound
+- Links:
+  - Marketplace: https://marketplace.visualstudio.com/items?itemName=SumitScript.faahhh-terminal-sound
   - VsixHub: https://www.vsixhub.com/publisher/38999/
-- Description: A lightweight, professional audio notification extension for Visual Studio Code that provides instant acoustic feedback for terminal executions, build tasks, and debugger states. When errors occur or builds finish, it plays a custom notification sound (such as the viral "faaaahhh" sound or any custom audio).
-- Technical Highlights & Features:
-  - Bring your own sound: Point to any custom `.wav` or `.mp3` file on the local machine.
-  - Fully customizable volume (0–100) and configurable delay before audio playback.
-  - Flexible keyword triggers: Monitors terminal output for keywords like error, warning, crash, exception, failed, panic, etc.
-  - Debounced instant playback: Prevents sound storms by debouncing rapid bursts of terminal errors.
-  - Cross-platform: Fully compatible across Windows, macOS, and Linux.
-  - Zero npm dependencies: Built with native capabilities to ensure near-zero latency and editor performance.
+- Description: Audio notification extension for VS Code providing acoustic feedback on terminal executions, build tasks, and debugger states with zero npm dependencies, configurable keywords, custom audio (.wav/.mp3), delay, and debounced playback across Windows, macOS, and Linux.
 
-2. AI-Powered WhatsApp Automation & Support Genie (RAG Pipeline)
-- Repository: https://github.com/sumitscript/whatsapp_automation
-- Description: An end-to-end automated WhatsApp assistant using local AI and Retrieval-Augmented Generation (RAG) to provide grounded answers to user inquiries.
-- Technical Stack & Architecture:
-  - Frontend / WhatsApp Client: `whatsapp-web.js` (Node.js) with headless Chrome automation and QR authentication.
-  - LLM Service: Local inference with `Mistral:7b-instruct-v0.3-q3_K_M` running via Ollama.
-  - Vector Embeddings: `nomic-embed-text:v1.5` running locally via Ollama.
-  - Vectorstore: ChromaDB for local persistent document storage and semantic vector retrieval.
-  - Reranker: Cross-Encoder reranking model (`cross-encoder/ms-marco-MiniLM-L-6-v2`) to re-score top candidate chunks for maximum precision.
-  - Backend API: Python (FastAPI/Uvicorn) with in-memory semantic query caching for sub-second repeat responses.
-  - Out-of-Scope Handling: Strict prompt boundaries ensuring the bot politely acknowledges when requested information is outside its knowledge base rather than hallucinating.
+6. DNA Sequence Matcher (Bioinformatics & Next.js)
+- Stack: Next.js, MongoDB, Algorithmic DSA
+- Implementation: Knuth-Morris-Pratt (KMP) algorithm with LPS array for rapid exact matching on ~156,000 character genomic sequences; Levenshtein Distance for percentage-based species similarity matching.
 
-3. DNA Sequence Matcher (Bioinformatics & Next.js)
-- Description: An algorithmic web platform developed as an impact training challenge to match biological DNA sequences across multiple species, delivering both exact matches and similarity percentages.
-- Technical Implementation:
-  - Knuth-Morris-Pratt (KMP) Algorithm: Utilized LPS (Longest Prefix Suffix) preprocessing to perform fast exact substring matching on long sequences (~156,000 characters) without redundant comparisons, beating brute-force search.
-  - Levenshtein Distance Algorithm: Computed minimum edit distance (insertions, deletions, substitutions) to calculate accurate percentage similarities when exact matches do not exist.
-  - Tech Stack: Next.js frontend, MongoDB for sequence data storage, and custom algorithmic implementations.
+7. Hand Gesture-Controlled Image Viewer (Computer Vision)
+- Stack: Python, OpenCV, MediaPipe
+- Implementation: Touchless image viewer with pinch-to-zoom scaling, swipe gesture navigation, and virtual cursor tracking without physical peripherals.
 
-4. Hand Gesture-Controlled Image Viewer (Computer Vision)
-- Description: A touchless, hand gesture-controlled image viewer that lets users manipulate visual assets without touching keyboard or mouse.
-- Technical Implementation:
-  - Built using Python, OpenCV, and MediaPipe for real-time hand landmark detection and tracking.
-  - Pinch-to-zoom gesture controls image scaling smoothly in real time.
-  - Extended with swipe gestures for navigating across images and finger-tracking for virtual cursor control.
+8. Trainerconnect
+- Stack: HTML5, CSS3, JavaScript, Flask (Python), MongoDB
+- Description: Online marketplace platform connecting fitness, language, and skill trainers with clients, featuring granular search filters and customer reviews.
 
-5. Trainerconnect
-- Description: A comprehensive marketplace web application connecting fitness, language, and skill-based trainers with clients.
-- Technical Implementation:
-  - Built with HTML5, CSS3, JavaScript, Python (Flask), and MongoDB.
-  - Included dynamic filtering based on location, skill categories, and trainer availability.
-  - Built-in customer review and testimonial modules for trainer verification.
-
-6. ViralWhisper
+9. ViralWhisper
 - Repository: https://github.com/sumitscript/ViralWhisper
-- Description: An AI-powered social engagement tool designed for founders and creators to discover relevant discussions via keyword monitoring and draft contextual, high-value replies using local Ollama LLMs.
+- Description: Local AI-powered social engagement tool for solo founders, using Ollama LLMs to discover discussions via keyword monitoring and craft contextual replies.
 
-7. PMGD - Predictive Modelling for GNIDA's Developmental Strategies (Smart City Hackathon)
+10. PMGD - Predictive Modelling for GNIDA's Developmental Strategies
 - Event: 6th Hackathon Sharda University (Team NPM_BUG)
-- Description: AI-powered urban planning and sustainable development solution for Greater Noida Industrial Development Authority (GNIDA).
-- Features: Smart land allocation, environmental impact assessment, data-driven infrastructure planning, and AI predictive analytics for sustainable urban expansion.
+- Description: AI-driven smart city urban growth analytics and sustainable land allocation platform for Greater Noida Industrial Development Authority.
 
-8. Personal Portfolio Website
+11. Personal Portfolio Website
 - Domain: https://www.sumitscript.com
 - Repository: https://github.com/sumitscript/Portfolio
-- Description: Custom-designed developer portfolio showcasing technical projects, blog writeups, engineering background, and contact details.
+- Description: Clean developer portfolio presenting technical projects, skills, articles, and interactive demos.

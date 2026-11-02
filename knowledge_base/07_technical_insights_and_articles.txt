@@ -20,3 +20,4 @@
 - Two Sum: Analyzed Brute Force (O(n^2)), Two-Pointer after sorting (O(n log n)), and optimal Hash Table lookup (O(n) time, O(n) space) for single-pass complement discovery.
 - Valid Palindrome (LeetCode 125): Compared string mutation vs. two-pointer in-place traversal with character filtering for optimal O(1) space complexity.
 - Valid Parentheses (LeetCode 20): Implemented stack-based matching with bracket character validation to guarantee LIFO matching rules.
+

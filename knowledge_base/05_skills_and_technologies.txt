@@ -1,28 +1,19 @@
-# Sumit Soni - Technical Skills & Stack
+# Sumit Soni - Key Technical Expertise & Skills
 
 Programming Languages:
 - Java: Core Java, Object-Oriented Programming (OOP), Multithreading, Algorithms, Android development.
-- Python: FastAPI, Flask, OpenCV, MediaPipe, LangChain, Sentence-Transformers, Scripting, Automation.
-- JavaScript / TypeScript: Node.js, Next.js, React, Express, modern ES6+ syntax, DOM manipulation.
-- SQL & Query Languages: Relational queries, schema design, GraphQL schema and mutation querying.
-- Web Foundations: HTML5, Semantic Markup, CSS3 (Flexbox, Grid, 2D Transforms, Transitions, Keyframe Animations, Box Model).
+- CPP (C++): Object-Oriented Programming, Data Structures, Algorithmic efficiency, Memory considerations.
+- Python: FastAPI, Flask, Machine Learning Optimization, OpenCV, MediaPipe, LangChain, Sentence-Transformers, Scripting, Automation.
+- JavaScript & TypeScript: Full-stack development with ReactJS, Next.js, NodeJS, Express.js, TypeScript typing, DOM, async programming.
+- SQL & Databases: MySQL, MongoDB (Aggregations, index optimization), ChromaDB (Vectorstore), SQLite.
+- Web Foundations: HTML5, CSS3, Responsive Design, Flexbox, Grid, CSS animations, Box Model.
 
-Frameworks & Libraries:
-- Backend & APIs: FastAPI, Flask, Node.js, Express, Uvicorn, RESTful API design.
-- Frontend: Next.js, React, HTML5, CSS3, Tailwind / responsive design.
-- AI & LLM Engineering: LangChain, Ollama, ChromaDB, HuggingFace Sentence-Transformers (Cross-Encoder rerankers), RAG pipeline design, Semantic Caching.
-- Computer Vision: OpenCV, MediaPipe.
+Web & Framework Expertise:
+- Frontend: ReactJS, Next.js, TypeScript, JavaScript, HTML, CSS, ExcelJS.
+- Backend & Microservices: NodeJS, Express.js, FastAPI (Python), Flask (Python), Uvicorn.
+- APIs & Security: REST API architecture, GraphQL, JSON Web Tokens (JWT), Windows DPAPI machine-bound encryption, API vulnerability auditing (broken access control, excessive data exposure).
+- Cloud & Infrastructure: AWS, Docker, Microservices Architecture, Local LLM Inference (Ollama).
 
-Databases & Storage:
-- NoSQL: MongoDB (Aggregation pipelines, index optimization, multi-collection lookups).
-- Vector Databases: ChromaDB (embeddings storage, cosine similarity search).
-- Relational / Embedded: SQLite, MySQL.
-
-System Design & Architecture:
-- Low-Level Design (LLD): Clean OOP architecture, modular service contracts, design patterns, separation of concerns.
-- Performance & Query Optimization: N+1 query elimination, in-memory memoization, caching layers, batching exports.
-- Security & Secrets Management: Machine-bound encryption via Windows DPAPI (`CryptProtectData`), encryption at rest, least-privilege scoping, credential brokering.
-- Application Security (AppSec): Network inspection, DevTools traffic debugging, GraphQL write mutation auditing, excessive data exposure prevention, broken access control discovery.
-
-DevOps & Developer Tools:
-- Docker, Git, GitHub, Visual Studio Code (Extension Development), Linux / Bash, Windows PowerShell, Postman / Thunder Client.
+Testing & Quality Assurance:
+- Functional Testing & Non-Functional Testing: API testing, load testing, performance profiling, latency optimization, boundary and validation checks.
+- Developer Tooling & Version Control: Git, GitHub, Visual Studio Code (Extension API), Postman / Thunder Client, Linux / PowerShell.

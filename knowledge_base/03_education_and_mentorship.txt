@@ -1,16 +1,18 @@
 # Sumit Soni - Education & Mentorship
 
 Education:
-Institution: Parul University
-Degree: Bachelor of Technology (BTech) in Computer Science
-Duration: 2022 – Present
-Location: Vadodara, Gujarat, India
-Key Coursework: Data Structures & Algorithms, Object-Oriented Programming, Database Management Systems, Operating Systems, Web Development, Mobile App Development, Internet of Things (IoT).
+- Institution: Parul Institute of Technology (PIT), Parul University
+- Degree: Bachelor of Technology (B.Tech.) in Computer Science and Engineering (CSE)
+- Duration: 2022 – 2026
+- Location: Vadodara, Gujarat, India
+- Academic Performance: CGPA 7.52 / 10
 
-Academic Mentorship & Guidance:
-Sumit has been guided and mentored by respected faculty and mentors throughout his academic and engineering journey:
-- Suraj Mourya Sir: Key guide and mentor for DSA, algorithmic problem solving, software development projects, and technical excellence.
-- N Narasimha Pillai Sir: Guide and mentor across major software and algorithmic challenges (including the DNA Sequence Matcher, Trainerconnect, and Computer Vision projects).
-- Maksud Vahora Sir: Faculty mentor supporting engineering milestones and innovation initiatives.
-- Mohammad Abrar M Sir: Training and placement mentor supporting professional deep skilling and impact training.
-- Love Babbar bhaiya: Mentor for Web Development, CSS foundations, and full-stack concepts during early engineering challenges.
+Key Academic Competencies:
+- Data Structures & Algorithms, Object-Oriented Programming (Java, C++), Database Management Systems (MySQL, MongoDB), Operating Systems, Web Technologies, Software Engineering, Internet of Things (IoT).
+
+Mentorship & Guidance:
+- Suraj Mourya Sir: Algorithmic mentor, DSA guidance, and technical project advisor.
+- N Narasimha Pillai Sir: Guide across complex bioinformatics and full-stack challenges (DNA sequence matching, marketplace systems, computer vision).
+- Maksud Vahora Sir: Faculty mentor supporting engineering initiatives and student innovations.
+- Mohammad Abrar M Sir: Training and placement mentor supporting enterprise upskilling and industry-readiness.
+- Love Babbar bhaiya: Mentor for Web Development, CSS foundations, and full-stack architecture.
