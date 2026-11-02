@@ -7,7 +7,21 @@ const axios = require('axios'); // Import Axios
 // List of specified numbers
 const specifiedNumbers = ['214392603996165@lid', '918401997567@c.us', '917568119230@c.us'];
 
-const client = new Client();
+const client = new Client({
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu'
+        ]
+    }
+});
 
 // Function to update the message log file
 function updateMessageFile(from, messageBody) {

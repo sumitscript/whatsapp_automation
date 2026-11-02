@@ -5,6 +5,7 @@ __pycache__/
 
 # WhatsApp web cache and chat logs
 .wwebjs_cache/
+.wwebjs_auth/
 messages.txt
 
 # Vector Database (Local ChromaDB)
