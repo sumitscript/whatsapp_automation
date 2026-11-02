@@ -1,11 +1,11 @@
 // whatsapp-automation.js
-const { Client } = require('whatsapp-web.js');
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const axios = require('axios'); // Import Axios
 
 // List of specified numbers
-const specifiedNumbers = ['919893525748@c.us', '918401997567@c.us', '917568119230@c.us'];
+const specifiedNumbers = ['214392603996165@lid', '918401997567@c.us', '917568119230@c.us'];
 
 const client = new Client();
 
@@ -26,7 +26,7 @@ function updateMessageFile(from, messageBody) {
 // Function to generate response using the new Python API
 async function generateResponse(inputText) {
     try {
-        const response = await axios.post('http://localhost:8000/chat', {
+        const response = await axios.post('http://localhost:9000/chat', {
             message: inputText
         });
         return response.data.response;
@@ -43,6 +43,18 @@ async function generateResponse(inputText) {
 client.on('qr', (qr) => {
     console.log("QR Code generated:");
     qrcode.generate(qr, { small: true });
+});
+
+client.on('loading_screen', (percent, message) => {
+    console.log('LOADING SCREEN', percent, message);
+});
+
+client.on('authenticated', () => {
+    console.log('AUTHENTICATED');
+});
+
+client.on('auth_failure', msg => {
+    console.error('AUTHENTICATION FAILURE', msg);
 });
 
 // Event when client is ready

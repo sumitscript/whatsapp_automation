@@ -7,14 +7,16 @@ import os
 import time
 from fastapi import FastAPI
 import uvicorn
+from contextlib import asynccontextmanager
 
 # --- RAG Specific Imports ---
 from langchain_community.document_loaders import TextLoader
-from langchain_community.embeddings import OllamaEmbeddings
-from langchain.text_splitter import CharacterTextSplitter
-from langchain_community.vectorstores import Chroma
-from langchain.prompts import ChatPromptTemplate
-from langchain_community.llms import Ollama
+from langchain_ollama import OllamaEmbeddings
+from langchain_text_splitters import CharacterTextSplitter
+from langchain_chroma import Chroma
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_ollama import OllamaLLM
+
 
 # --- Reranking Imports ---
 from sentence_transformers import CrossEncoder
@@ -23,8 +25,8 @@ from sentence_transformers import CrossEncoder
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Ollama API endpoint for chat
-MODEL_NAME = "mistral:latest" # Use a model that you know is fast on your system
-EMBEDDING_MODEL_NAME = "nomic-embed-text:latest"
+MODEL_NAME = "mistral:7b-instruct-v0.3-q3_K_M" # Use a model that you know is fast on your system
+EMBEDDING_MODEL_NAME = "nomic-embed-text:v1.5"
 
 # --- RAG Setup ---
 KNOWLEDGE_BASE_DIR = "knowledge_base"
@@ -163,7 +165,7 @@ Question: {question}
 """
         prompt = ChatPromptTemplate.from_template(rag_template)
         # Updated temperature for more natural, varied language
-        llm = Ollama(model=MODEL_NAME, temperature=0.7, base_url="http://localhost:11434")
+        llm = OllamaLLM(model=MODEL_NAME, temperature=0.4, base_url="http://localhost:11434")
 
         formatted_prompt = prompt.format(context=context_text, question=input_text)
         response = llm.invoke(formatted_prompt)
@@ -203,12 +205,9 @@ def check_ollama_status(model_name):
         logging.error(f"Error checking Ollama status: {str(e)}")
         return False
 
-# --- FastAPI Setup ---
-app = FastAPI()
-
 # Event handler for startup
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     logging.info("Starting FastAPI application...")
     # Initialize the vector store only once when the server starts
     if not check_ollama_status(MODEL_NAME):
@@ -216,6 +215,10 @@ async def startup_event():
         sys.exit(1)
     initialize_vectorstore()
     logging.info("FastAPI application started.")
+    yield
+
+# --- FastAPI Setup ---
+app = FastAPI(lifespan=lifespan)
 
 @app.post("/chat")
 def chat_endpoint(request_data: dict):
@@ -227,4 +230,4 @@ def chat_endpoint(request_data: dict):
     return {"response": response}
 
 if __name__ == "__main__":
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, log_level="info", reload=False)
+ uvicorn.run("generate_response:app", host="0.0.0.0", port=9000, log_level="info", reload=False)

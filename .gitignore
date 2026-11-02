@@ -1,0 +1,11 @@
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+
+# WhatsApp web cache and chat logs
+.wwebjs_cache/
+messages.txt
+
+# Vector Database (Local ChromaDB)
+chroma_db/
