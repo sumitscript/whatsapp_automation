@@ -5,7 +5,7 @@ const fs = require('fs');
 const axios = require('axios'); // Import Axios
 
 // List of specified numbers
-const specifiedNumbers = ['214392603996165@lid', '918401997567@c.us', '917568119230@c.us'];
+const specifiedNumbers = [];
 
 const client = new Client({
     authStrategy: new LocalAuth(),
