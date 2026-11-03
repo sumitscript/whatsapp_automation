@@ -65,6 +65,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      # TEMPORARY: prints the shape of the SSH secrets (never their values). Remove once deploy works.
+      - name: Check secret shape
+        env:
+          H: ${{ secrets.SSH_HOST }}
+          K: ${{ secrets.SSH_KEY }}
+          P: ${{ secrets.SSH_PORT }}
+        run: |
+          echo "host length: ${#H}  contains colon: $([[ $H == *:* ]] && echo yes || echo no)  starts with SHA256: $([[ $H == SHA256* ]] && echo yes || echo no)"
+          echo "key first line: $(printf '%s' "$K" | head -n1 | cut -c1-35)"
+          echo "port set: $([ -n "$P" ] && echo yes || echo no)"
       - name: Upload compose + proxy config
         uses: appleboy/scp-action@v0.1.7
         with:
