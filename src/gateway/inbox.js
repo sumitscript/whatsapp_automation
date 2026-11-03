@@ -14,7 +14,7 @@ import { helpText, parseCommand } from '../brain/commands.js';
 import { TOPICS } from '../bus/index.js';
 
 const TEXT_TYPES = new Set(['chat', 'text']);
-const TYPING_REFRESH_MS = 20_000; // WhatsApp drops the typing state after ~25s
+const TYPING_REFRESH_MS = 8_000; // the contact's phone drops "typing…" after ~10–25s, so keep re-sending it
 const TYPING_MAX_MS = 180_000;
 const ERROR_NOTICE_COOLDOWN_MS = 10 * 60_000;
 

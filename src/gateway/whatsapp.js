@@ -191,11 +191,33 @@ export class WhatsAppManager extends EventEmitter {
     return this.client.sendMessage(chatId, text, quotedMessageId ? { quotedMessageId } : {});
   }
 
+  /**
+   * Show/hide "typing…" (the three dots) on the contact's phone. Never throws:
+   * callers fire-and-forget it, so failures are logged (throttled) instead of lost.
+   */
   async setTyping(chatId, on) {
     if (!this.ready) return;
-    const chat = await this.client.getChatById(chatId);
-    if (on) await chat.sendStateTyping();
-    else await chat.clearState();
+    try {
+      // WhatsApp only shows chat states from an account that is "available".
+      if (on && Date.now() - (this.lastPresenceAt || 0) > 60_000) {
+        this.lastPresenceAt = Date.now();
+        await this.client.sendPresenceAvailable().catch(() => {});
+      }
+      try {
+        const chat = await this.client.getChatById(chatId);
+        if (on) await chat.sendStateTyping();
+        else await chat.clearState();
+      } catch (err) {
+        // Library helper broke (WhatsApp Web updates do this) — talk to the page directly.
+        if (!this.client?.pupPage) throw err;
+        await this.client.pupPage.evaluate((id, state) => window.WWebJS.sendChatstate(state, id), chatId, on ? 'typing' : 'stop');
+      }
+    } catch (err) {
+      if (Date.now() - (this.lastTypingWarnAt || 0) > 60_000) {
+        this.lastTypingWarnAt = Date.now();
+        this.log.warn('Could not send typing state', { chatId, on, err });
+      }
+    }
   }
 
   async markSeen(chatId) {
