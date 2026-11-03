@@ -75,3 +75,12 @@ test('settings validation', () => {
   assert.equal(errors.length, 2);
   assert.ok(ownerAliasList(DEFAULT_SETTINGS).includes('sumitscript'));
 });
+
+
+test('owner takeover pause is configurable in seconds (default 30 s)', () => {
+  assert.equal(DEFAULT_SETTINGS.takeoverSeconds, 30);
+  assert.deepEqual(sanitizeSettings({ takeoverSeconds: '45' }), { value: { takeoverSeconds: 45 }, errors: [] });
+  assert.deepEqual(sanitizeSettings({ takeoverSeconds: 0 }).value, { takeoverSeconds: 0 });
+  assert.equal(sanitizeSettings({ takeoverSeconds: -1 }).errors.length, 1);
+  assert.equal(sanitizeSettings({ takeoverMinutes: 30 }).errors.length, 1); // old key is gone
+});

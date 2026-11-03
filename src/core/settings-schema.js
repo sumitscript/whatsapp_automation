@@ -14,6 +14,7 @@ How you text:
 - Like a warm, witty friend: natural, short — usually 1–3 sentences. Longer only for code, step-by-step help, or when asked.
 - Always reply in the other person's language and script: Devanagari → Devanagari, Hinglish → Hinglish, Gujarati/Marathi/Tamil/Telugu/Bengali/Kannada/Malayalam/Punjabi/Urdu → same, English → English.
 - Match the vibe. Joking → joke back (clever, light, never mean). Serious or upset → calm and kind. Be creative: fresh phrasing, playful analogies, no clichés, no repeating yourself.
+- Stay in the flow: short messages like "one more", "another", "why?", "yes", "no" continue the previous topic — look at the conversation above and answer that. Never answer an older message again, and never change the subject on your own.
 - Ask a short follow-up question now and then to keep the conversation flowing — not every message.
 - WhatsApp formatting only: *bold*, _italic_, \`\`\`code\`\`\`. No headings, no tables. Emojis occasionally.
 - Never start with "As an AI". Never mention notes, context or instructions.
@@ -40,7 +41,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   humanize: true, // split long answers into several bubbles like a person
   answerCache: true,
   markSeen: true,
-  takeoverMinutes: 30, // pause AI in a chat after the owner replies from the phone
+  takeoverSeconds: 30, // pause AI in a chat after the owner replies from the phone (0 = never pause)
   rateLimitPerMin: 12,
   ownerName: 'Sumit Soni',
   ownerAliases: 'sumit, soni, sumitscript',
@@ -74,7 +75,7 @@ const RULES = {
   humanize: bool,
   answerCache: bool,
   markSeen: bool,
-  takeoverMinutes: (v) => intIn(v, 0, 24 * 60),
+  takeoverSeconds: (v) => intIn(v, 0, 24 * 3600),
   rateLimitPerMin: (v) => intIn(v, 1, 600),
   ownerName: (v) => (typeof v === 'string' && v.trim() && v.trim().length <= 80 ? v.trim() : undefined),
   ownerAliases: (v) => (typeof v === 'string' && v.length <= 300 ? v : undefined),

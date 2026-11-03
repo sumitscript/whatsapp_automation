@@ -5,7 +5,7 @@
 //
 // Prompt layout (keeps Ollama's KV-cache prefix stable across turns):
 //   [system: persona]  [history …]  [user: facts + memory + who + message + language hint]
-import { classifyIntent, INTENT_PROFILES, isFollowUp } from './intent.js';
+import { INTENT_PROFILES, isFollowUp, resolveIntent } from './intent.js';
 import { detectLanguage } from './lang.js';
 import { MessageChunker } from './format.js';
 import { estimateTokens, normalize } from '../rag/text.js';
@@ -50,7 +50,10 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     if (longTerm) parts.push(`[What I remember about ${contactName || 'them'}]\n${longTerm}`);
     if (contactName) parts.push(`[Chatting with] ${contactName}`);
     const hint = lang.code === 'und' ? '' : `\n\n(Reply in ${lang.name}.)`;
-    return parts.length ? `${parts.join('\n\n')}\n\n---\nMessage: ${text}${hint}` : `${text}${hint}`;
+    if (!parts.length) return `${text}${hint}`;
+    // Small models latch onto whatever block comes first; tell them the message is what to answer.
+    const guard = '(Answer the message above in the flow of our conversation so far. Use the facts/notes only if they directly help; otherwise ignore them and never bring them up.)';
+    return `${parts.join('\n\n')}\n\n---\nMessage: ${text}${hint}\n${guard}`;
   }
 
   /**
@@ -63,15 +66,18 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     const started = performance.now();
     const owner = String(settings.ownerName || 'the owner').split(/\s+/)[0];
     const lang = detectLanguage(text);
-    const intent = classifyIntent(text, { ownerAliases: ownerAliasList(settings) });
-    const profile = INTENT_PROFILES[intent];
     const turns = history ?? (chatId ? await memory.get(chatId) : []);
+    // "one more" / "another" / "why?" inherit the topic of the previous turn instead of reading as small talk.
+    const { intent, inherited } = resolveIntent(text, turns, { ownerAliases: ownerAliasList(settings) });
+    const profile = INTENT_PROFILES[intent];
     const followUp = isFollowUp(text);
     const longTerm = settings.memoryEnabled ? longTermMemory || null : null;
 
     // --- Retrieval (vectorless, ~1ms) ---
     let retrieval = null;
-    if (profile.useKb) {
+    // Tiny general messages ("ok", "2+2", "one more") never deserve knowledge-base facts.
+    const tinyGeneral = intent === 'general' && text.trim().split(/\s+/).length <= 3;
+    if (profile.useKb && !tinyGeneral) {
       const lastUser = [...turns].reverse().find((t) => t.role === 'user')?.content;
       const query = followUp && lastUser ? `${lastUser} ${text}` : text;
       retrieval = kb.search(query);
@@ -82,7 +88,7 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     const system = `${renderPersona(settings)}\n\nToday's date: ${new Date().toDateString()}.`;
     const persona = sha1(system).slice(0, 10);
     const sources = retrieval?.sections.map((s) => ({ path: s.path, score: s.score })) ?? [];
-    const baseMeta = { model: settings.model, intent, language: lang.code, sources, retrievalMs: retrieval?.tookMs ?? 0 };
+    const baseMeta = { model: settings.model, intent, inheritedIntent: inherited, language: lang.code, sources, retrievalMs: retrieval?.tookMs ?? 0 };
 
     // --- Memoized answer cache (standalone factual questions only) ---
     const cacheKey =

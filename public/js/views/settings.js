@@ -51,6 +51,8 @@ export async function mount(root, { hub }) {
                 <small class="muted">Comma-separated, e.g. /bye, /stop</small></label>
               <label class="field"><span>Auto-end after idle (minutes)</span><input type="number" name="sessionIdleMinutes" min="0" max="1440" />
                 <small class="muted">0 = never end automatically</small></label>
+              <label class="field"><span>Pause AI after I reply from my phone (seconds)</span><input type="number" name="takeoverSeconds" min="0" max="86400" />
+                <small class="muted">0 = never pause. Default 30 s.</small></label>
             </div>
             <label class="field"><span>Welcome message</span>
               <textarea name="welcomeMessage" rows="3" placeholder="Hi {name}! I'm {persona}, {owner}'s AI twin. Send {stop} to end."></textarea>
@@ -132,7 +134,7 @@ export async function mount(root, { hub }) {
     [
       'replyMode', 'ownerName', 'persona', 'temperature', 'maxTokens', 'historyTurns', 'historyTokens', 'debounceMs',
       'humanize', 'answerCache', 'replyInGroups', 'memoryEnabled', 'personaName', 'startCommands', 'stopCommands',
-      'welcomeMessage', 'goodbyeMessage', 'sessionIdleMinutes',
+      'welcomeMessage', 'goodbyeMessage', 'sessionIdleMinutes', 'takeoverSeconds',
     ].forEach((k) => set(k, st[k]));
     $('#temp-out', root).textContent = Number(form.temperature.value).toFixed(2);
   }
@@ -154,6 +156,7 @@ export async function mount(root, { hub }) {
       historyTokens: num('historyTokens'),
       debounceMs: num('debounceMs'),
       sessionIdleMinutes: num('sessionIdleMinutes'),
+      takeoverSeconds: num('takeoverSeconds'),
       humanize: form.humanize.checked,
       answerCache: form.answerCache.checked,
       replyInGroups: form.replyInGroups.checked,

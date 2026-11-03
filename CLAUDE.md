@@ -50,7 +50,7 @@ Tests, lint and `kb:search` run **without `node_modules`**. The modules they tou
 - **Folding:** after a reply, if stored turns exceed `historyTurns + 8`, or when a session ends (`summarize` job on `wa.inbound`), the worker queues a fold: `brain.summarize` merges the oldest turns into the notes, then `trimOldest`. The fold queue only drains when `inFlight === 0`, so summaries never delay a live reply.
 
 **Reply pipeline (`brain/pipeline.js`):**
-- `classifyIntent` (regex) picks an `INTENT_PROFILES` entry: temperature, token scale, and whether to use the KB (`true`, `false`, or `'auto'` = only if `topScore ≥ 1.6×minScore`).
+- `resolveIntent` (regex `classifyIntent` plus inheritance) picks an `INTENT_PROFILES` entry. Short follow-ups ("one more", "why?") inherit the previous user turn's intent, and tiny `general` messages never use the KB. Without this a 3B model drifts onto random KB facts. The entry sets: temperature, token scale, and whether to use the KB (`true`, `false`, or `'auto'` = only if `topScore ≥ 1.6×minScore`).
 - `detectLanguage` produces the "(Reply in X.)" hint. Follow-ups reuse the previous user turn as the retrieval query.
 - **Context window:** `selectHistory` keeps the newest turns within `min(historyTokens, numCtx − system − final turn − maxTokens − 256)` and `historyTurns` messages. It starts on a user turn and merges same-role runs.
 - The final user turn carries `[Facts about me]`, `[What I remember about <name>]`, `[Chatting with]`, then the message and the language hint. The persona prompt refers to these labels, so keep them in sync.
@@ -69,8 +69,9 @@ Tests, lint and `kb:search` run **without `node_modules`**. The modules they tou
 **Cross-process state:**
 - **Settings:** stored in Postgres (`settings` key/value jsonb), validated by `core/settings-schema.js`. Every process caches them and reloads on the Redis `ch:settings` pub/sub. A new setting must be added to `DEFAULT_SETTINGS` **and** `RULES` there, or it is rejected.
 - **KB edits:** made through the API, which writes the file, reloads it and publishes `ch:kb`. Both processes also `fs.watch` the directory.
+- **LLM status:** the worker writes a heartbeat to Redis `worker:status` (every 5 s, 20 s TTL). `GET /api/llm/status` merges it with live Ollama `/api/version`, `/api/tags` and `/api/ps` for the dashboard card.
 - **Logs:** go to stdout **and** to a capped Redis list + pub/sub (`core/redis.js` `attachRedisLogSink`). `gateway/realtime.js` relays them to Socket.IO room `logs`. Never log inside that relay handler: it would loop.
-- **Own-message echoes:** inbox tracks bodies it is sending (`echo` map). `message_create` events from the phone that aren't ours count as owner takeover (Redis `takeover:<chatId>` TTL) and are added to memory as assistant turns.
+- **Own-message echoes:** inbox tracks bodies it is sending (`echo` map). `message_create` events from the phone that aren't ours count as owner takeover (Redis `takeover:<chatId>`, TTL = `takeoverSeconds`, default 30) and are added to memory as assistant turns.
 
 **Web console (`public/`):** vanilla ES modules, no build step, served statically by the gateway.
 - The API contract is the routes in `gateway/http.js`. Socket events are `wa:status`, `message:new`, `chat:update`, `typing`, `log` and `model:pull`.

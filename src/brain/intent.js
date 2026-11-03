@@ -6,7 +6,7 @@ const GREETING = /^(hi+|hello+|hey+|hii+|helo|hlo|yo|sup|namaste|namaskar|namask
 const THANKS = /\b(thanks|thank you|thx|ty|dhanyavaad|dhanyawad|shukriya|thnx|शुक्रिया|धन्यवाद)\b/i;
 const JOKE = /(😂|🤣|😆|😜|😝|😹|😅|\bha(ha)+\b|\bhe(he)+\b|\blo+l\b|\blmao\b|\brofl\b|\bjoke\b|\bjokes\b|\bfunny\b|\bmeme\b|\bmazak\b|\bmajak\b|\bmasti\b|\bchutkula\b|\bpj\b|\broast\b|मज़ाक|चुटकुला)/i;
 const CODE = /(```|\b(code|coding|function|bug|debug|error|exception|stack ?trace|compile|syntax|regex|sql|query|api|endpoint|python|javascript|typescript|java|c\+\+|cpp|golang|rust|react|node|express|django|flask|fastapi|docker|kubernetes|git|leetcode|algorithm|complexity|recursion|array|linked list|class|object|async|promise|npm|pip)\b|[{};]\s*$|=>|\bdef\s+\w+\(|\bconsole\.log\b)/i;
-const MATH = /^[\d\s+\-*/().%^=x×÷]+$|\b(calculate|solve|integral|derivative|equation|percent of|kitna hota)\b/i;
+const MATH = /^[\d\s+\-*/().%^=x×÷]+$|\d\s*[+\-*/×÷^%]\s*\d|\b(calculate|solve|integral|derivative|equation|percent of|kitna hota)\b/i;
 const OWNER_WORDS = /\b(you|your|yours|u|ur|tum|tumhara|tumhari|aap|aapka|aapki|tera|teri|he|his|him|uska|uski|unka|unki)\b/i;
 const PROFILE = /\b(work|working|job|naukri|kaam|company|intern|internship|experience|project|projects|skill|skills|tech ?stack|college|university|degree|cgpa|gpa|study|padhai|education|resume|cv|portfolio|github|linkedin|website|contact|email|phone|number|hire|hiring|available|availability|open to work|achievement|certificate|certification|hackathon|blog|article|extension|location|city|rehte|from where|kahan se|age|about yourself|introduce|who are you|kaun ho|tum kaun)\b/i;
 
@@ -44,6 +44,26 @@ export const INTENT_PROFILES = Object.freeze({
   about_owner: { temperature: 0.3, tokenScale: 1, useKb: true },
   general: { temperature: null, tokenScale: 1, useKb: 'auto' }, // KB used only when retrieval is confident
 });
+
+/**
+ * Short follow-ups ("one more", "another one", "why?", "yes") say nothing about
+ * their topic, so classifying them alone yields 'general' and drags in random
+ * knowledge-base facts. Inherit the topic of the previous user turn instead.
+ * @param {string} text
+ * @param {{role:string, content:string}[]} turns conversation so far (oldest first)
+ * @param {{ ownerAliases?: string[] }} [opts]
+ * @returns {{ intent: string, inherited: boolean }}
+ */
+export function resolveIntent(text, turns, opts = {}) {
+  const own = classifyIntent(text, opts);
+  if (own !== 'general' || !isFollowUp(text)) return { intent: own, inherited: false };
+  const lastUser = [...(turns || [])].reverse().find((t) => t.role === 'user')?.content;
+  if (!lastUser) return { intent: own, inherited: false };
+  const prev = classifyIntent(lastUser, opts);
+  // A greeting/thanks says nothing about what the next short message is about.
+  if (prev === 'general' || prev === 'greeting' || prev === 'thanks') return { intent: own, inherited: false };
+  return { intent: prev, inherited: true };
+}
 
 /** Heuristic: does the message lean on earlier turns ("what about his 2nd one?")? */
 export function isFollowUp(text) {

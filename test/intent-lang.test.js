@@ -38,3 +38,28 @@ test('language detection for Indian languages', () => {
   assert.equal(detectLanguage('I love the sun').code, 'en');
   assert.equal(detectLanguage('👍').code, 'und');
 });
+
+import { resolveIntent } from '../src/brain/intent.js';
+
+test('arithmetic phrased as a question is math', () => {
+  assert.equal(intent('What is 2 + 2'), 'math');
+  assert.equal(intent('whats 15 * 4'), 'math');
+});
+
+test('short follow-ups inherit the previous topic', () => {
+  const turns = [
+    { role: 'user', content: 'Tell me a joke' },
+    { role: 'assistant', content: "Why don't eggs tell jokes? They'd crack each other up!" },
+  ];
+  assert.deepEqual(resolveIntent('One more', turns, { ownerAliases: aliases }), { intent: 'joke', inherited: true });
+  assert.deepEqual(resolveIntent('Another one', turns, { ownerAliases: aliases }), { intent: 'joke', inherited: true });
+});
+
+test('follow-ups do not inherit from greetings or when there is no history', () => {
+  const hi = [{ role: 'user', content: 'hi' }];
+  assert.equal(resolveIntent('one more', hi, { ownerAliases: aliases }).inherited, false);
+  assert.equal(resolveIntent('one more', [], { ownerAliases: aliases }).inherited, false);
+  // a message with its own topic is never overridden
+  const joke = [{ role: 'user', content: 'Tell me a joke' }];
+  assert.equal(resolveIntent('where does Sumit work?', joke, { ownerAliases: aliases }).intent, 'about_owner');
+});

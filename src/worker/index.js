@@ -4,7 +4,7 @@ import './env.js';
 import http from 'node:http';
 import { config } from '../core/config.js';
 import { logger } from '../core/logger.js';
-import { attachRedisLogSink, channels, createRedis, createRedisAnswerCache, createRedisMemory } from '../core/redis.js';
+import { attachRedisLogSink, channels, createRedis, createRedisAnswerCache, createRedisMemory, keys } from '../core/redis.js';
 import { createSettingsService } from '../core/settings.js';
 import { KeyedQueue, Semaphore, sleep } from '../core/util.js';
 import { createPool, migrate } from '../db/pg.js';
@@ -70,6 +70,21 @@ const bus = await createBus({ logger: log, redisFactory: createRedis });
 const lanes = new KeyedQueue(); // one lane per chat → replies stay in order
 const gate = new Semaphore(config.ollama.concurrency); // bounded parallel generations
 let inFlight = 0;
+let lastReply = null;
+let lastError = null;
+
+// Heartbeat for the console's "LLM status" card (expires if the worker dies).
+const startedAt = Date.now();
+const publishStatus = () =>
+  redis
+    .set(
+      keys.workerStatus,
+      JSON.stringify({ at: Date.now(), startedAt, model: modelState, inFlight, lanes: lanes.size, folding, queuedFolds: foldQueue.size, concurrency: config.ollama.concurrency, bus: bus.driver, kb: kb.version, lastReply, lastError }),
+      'EX',
+      20,
+    )
+    .catch(() => {});
+setInterval(publishStatus, 5000).unref();
 
 async function handleJob(job) {
   const out = (payload) => bus.publish(TOPICS.outbound, job.chatId, { jobId: job.jobId, chatId: job.chatId, ...payload });
@@ -92,9 +107,13 @@ async function handleJob(job) {
     });
     for await (const ev of stream) {
       if (ev.type === 'chunk') await out({ type: 'chunk', index: ev.index, text: ev.text, meta: ev.meta });
-      else if (ev.type === 'done') await out({ type: 'done', meta: ev.meta });
+      else if (ev.type === 'done') {
+        lastReply = { at: Date.now(), latencyMs: ev.meta.latencyMs, firstChunkMs: ev.meta.firstChunkMs, tokensPerSec: ev.meta.tokensPerSec ?? null, cached: !!ev.meta.cached, model: ev.meta.model };
+        await out({ type: 'done', meta: ev.meta });
+      }
     }
   } catch (err) {
+    lastError = { at: Date.now(), message: err.message };
     log.error('Reply generation failed', { chatId: job.chatId, err });
     await out({ type: 'error', error: err.message });
   } finally {
@@ -149,6 +168,7 @@ await bus.subscribe(TOPICS.inbound, 'ai-worker', async (job) => {
   if (!job.text) return;
   lanes.push(job.chatId, () => gate.run(() => handleJob(job))).catch((err) => log.error('Job failed', { err }));
 });
+publishStatus();
 log.info('Worker ready', { bus: bus.driver, model: settings.get().model, concurrency: config.ollama.concurrency });
 
 // Liveness/readiness for Docker healthchecks.

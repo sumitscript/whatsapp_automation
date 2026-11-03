@@ -282,11 +282,11 @@ export class Inbox {
     this.#broadcastMessage(saved, chatId);
     const s = this.settings.get();
     if (msg.body) await this.memory.append(chatId, [{ role: 'assistant', content: msg.body }]).catch(() => {});
-    if (s.takeoverMinutes > 0 && (s.replyMode !== 'session' || (await this.sessions.active(chatId)))) {
-      await this.redis.set(keys.takeover(chatId), '1', 'EX', s.takeoverMinutes * 60);
+    if (s.takeoverSeconds > 0 && (s.replyMode !== 'session' || (await this.sessions.active(chatId)))) {
+      await this.redis.set(keys.takeover(chatId), '1', 'EX', s.takeoverSeconds);
       this.#cancelPending(chatId);
       this.#typingStop(chatId, true);
-      this.log.info('Owner replied from phone; AI paused for this chat', { chatId, minutes: s.takeoverMinutes });
+      this.log.info('Owner replied from phone; AI paused for this chat', { chatId, seconds: s.takeoverSeconds });
     }
   }
 

@@ -206,6 +206,42 @@ export function createApp(deps) {
     const installed = await llm.listModels().catch(() => []);
     res.json({ current: settings.get().model, installed, catalog: catalogWithInstalled(installed) });
   });
+  // Live LLM health: Ollama itself (reachable? model installed/resident?) + the worker's heartbeat.
+  api.get('/llm/status', async (_req, res) => {
+    const model = settings.get().model;
+    const [version, installed, loaded, workerRaw] = await Promise.all([
+      llm.health().catch((err) => ({ error: err.message })),
+      llm.listModels().catch(() => null),
+      llm.loaded().catch(() => null),
+      redis.get(keys.workerStatus).catch(() => null),
+    ]);
+    const worker = workerRaw ? JSON.parse(workerRaw) : null;
+    const workerAlive = !!worker && Date.now() - worker.at < 15_000;
+    const ollamaUp = !version.error;
+    const want = model.includes(':') ? model : `${model}:latest`;
+    const resident = (loaded || []).find((m) => m.name === model || m.name === want) || null;
+    const installedOk = installed ? installed.some((m) => m.name === model || m.name === want) : null;
+
+    let state = 'ok';
+    let message = 'Ready to answer';
+    if (!ollamaUp) [state, message] = ['down', `Ollama is unreachable: ${version.error}`];
+    else if (installedOk === false) [state, message] = ['down', `Model ${model} is not installed — pull it from Settings`];
+    else if (!workerAlive) [state, message] = ['down', 'AI worker is not running (no heartbeat)'];
+    else if (worker.model?.error) [state, message] = ['down', `Model preparation failed: ${worker.model.error}`];
+    else if (!worker.model?.ready) [state, message] = ['degraded', 'Model is loading…'];
+    else if (!resident) [state, message] = ['degraded', 'Model is not resident in RAM yet — the next reply will be slow'];
+
+    res.json({
+      state,
+      message,
+      model,
+      ollama: { up: ollamaUp, version: version.version ?? null, url: config.ollama.url, error: version.error ?? null },
+      installed: installedOk,
+      resident: resident ? { sizeBytes: resident.size ?? null, sizeVramBytes: resident.size_vram ?? null, expiresAt: resident.expires_at ?? null } : null,
+      worker: workerAlive ? worker : null,
+      checkedAt: Date.now(),
+    });
+  });
   const pulling = new Set();
   api.post('/models/pull', async (req, res) => {
     const name = String(req.body?.name || '');

@@ -94,7 +94,7 @@ eSumit is Sumit's AI twin on WhatsApp. It is a self-hosted system with two Node 
   3. `brain.summarize` merges the oldest turns into the existing notes (temperature 0.2).
   4. `repo.setMemory` saves the notes, `memory.trimOldest` drops the folded turns, and a `memory` event goes out on `wa.outbound`.
 
-Owner messages sent from the phone are added to short-term memory as assistant turns. They also set the takeover key for `takeoverMinutes`.
+Owner messages sent from the phone are added to short-term memory as assistant turns. They also set the takeover key for `takeoverSeconds` (default 30).
 
 ## Reply pipeline (`brain/pipeline.js`)
 
@@ -157,7 +157,7 @@ The key prefix comes from `REDIS_PREFIX` (default `wa:`).
 | `wa:ctx:<chatId>` | Short-term memory list |
 | `wa:ans:<sha1>` | Memoized answers (`ANSWER_CACHE_TTL_SEC`, default 12 h) |
 | `wa:rl:<scope>:<id>:<minute>` | Per-minute rate limits (chat replies, logins) |
-| `wa:takeover:<chatId>` | Owner takeover (TTL = `takeoverMinutes`) |
+| `wa:takeover:<chatId>` | Owner takeover (TTL = `takeoverSeconds`) |
 | `wa:logs` | Capped log ring buffer (`LOG_BUFFER_SIZE`, default 2000) |
 | `wa:stats:cache_hits:<day>` | Cache-hit counter for the dashboard |
 | `wa:ch:logs` | Pub/sub: live log lines → Socket.IO room `logs` |

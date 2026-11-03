@@ -90,6 +90,7 @@ export const api = {
   settings: () => request('GET', '/api/settings'),
   saveSettings: (partial) => request('PUT', '/api/settings', partial),
   models: () => request('GET', '/api/models'),
+  llmStatus: () => request('GET', '/api/llm/status'),
   pullModel: (name) => request('POST', '/api/models/pull', { name }),
   playground: (message, history) => request('POST', '/api/playground', { message, history }),
 

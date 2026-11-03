@@ -2,7 +2,7 @@
 import { api } from '../api.js';
 import { icons } from '../icons.js';
 import {
-  $, displayPhone, escapeHtml, formatMs, formatNumber, formatTime, hueFor, html, initials, raw, relativeTime,
+  $, displayPhone, escapeHtml, formatBytes, formatMs, formatNumber, formatTime, hueFor, html, initials, raw, relativeTime,
 } from '../util.js';
 
 const REFRESH_MS = 30000;
@@ -57,6 +57,7 @@ export async function mount(root, { hub }) {
         <div><h1>Dashboard</h1><p class="muted" id="dash-sub">Loading…</p></div>
         <button class="icon-btn" id="dash-refresh" aria-label="Refresh" title="Refresh">${raw(icons.refresh)}</button>
       </header>
+      <section class="card"><h2 class="card-title">LLM health</h2><div id="dash-llm"><p class="muted">Checking…</p></div></section>
       <div class="stat-grid focus-cards" id="dash-tiles"></div>
       <section class="card"><h2 class="card-title">Messages per hour (24 h)</h2><div id="dash-chart"></div></section>
       <section class="card"><h2 class="card-title">Active sessions</h2><div id="dash-sessions"></div></section>
@@ -82,8 +83,35 @@ export async function mount(root, { hub }) {
     }
   }
 
+  async function loadLlm() {
+    const box = $('#dash-llm', root);
+    try {
+      const l = await api.llmStatus();
+      const tone = { ok: 'badge-ok', degraded: 'badge-warn', down: 'badge-bad' }[l.state] || 'badge-warn';
+      const label = { ok: 'Healthy', degraded: 'Degraded', down: 'Down' }[l.state] || l.state;
+      const w = l.worker;
+      const r = w?.lastReply;
+      const row = (k, v) => html`<div class="llm-row"><span class="muted">${k}</span><span>${v}</span></div>`;
+      const rows = [
+        row('Model', l.model),
+        row('Ollama', l.ollama.up ? `up · v${l.ollama.version || '?'}` : 'unreachable'),
+        row('Installed', l.installed == null ? '—' : l.installed ? 'yes' : 'no'),
+        row('In memory', l.resident ? formatBytes(l.resident.sizeBytes) : 'not loaded'),
+        row('Worker', w ? `up · ${w.inFlight} running, ${w.lanes} chats queued (max ${w.concurrency})` : 'no heartbeat'),
+        row('Last reply', r ? `${formatMs(r.latencyMs)}${r.tokensPerSec ? ` · ${r.tokensPerSec} tok/s` : ''}${r.cached ? ' · cached' : ''} · ${relativeTime(r.at)}` : '—'),
+        row('Last error', w?.lastError ? `${w.lastError.message} · ${relativeTime(w.lastError.at)}` : 'none'),
+      ];
+      box.innerHTML = html`
+        <p><span class="badge badge-dot ${tone}">${label}</span> <span class="muted">${l.message}</span></p>
+        <div class="llm-grid">${raw(rows.join(''))}</div>`;
+    } catch (e) {
+      box.innerHTML = html`<p class="muted">Could not load LLM status: ${e.message}</p>`;
+    }
+  }
+
   async function load() {
     loadSessions();
+    loadLlm();
     try {
       const st = await api.stats();
       $('#dash-sub', root).innerHTML = html`WhatsApp <strong>${st.waState || '—'}</strong> · model <strong>${st.model || '—'}</strong>`;

@@ -860,3 +860,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { box-shadow: 
   .focus-cards:has(> :hover) > :not(:hover) { filter: none !important; transform: none !important; opacity: 1 !important; }
   #login-root { scroll-behavior: auto; }
 }
+
+/* LLM health card (dashboard) */
+.llm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px 24px; margin-top: 10px; }
+.llm-row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.18)); font-size: 0.9rem; }
+.llm-row span:last-child { text-align: right; overflow-wrap: anywhere; }

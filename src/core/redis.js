@@ -12,6 +12,7 @@ export const keys = Object.freeze({
   logs: `${P}logs`,
   cacheHits: (day) => `${P}stats:cache_hits:${day}`,
   waStatus: `${P}wa:status`,
+  workerStatus: `${P}worker:status`,
 });
 
 export const channels = Object.freeze({

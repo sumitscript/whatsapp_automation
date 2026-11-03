@@ -51,7 +51,7 @@ Measured on this KB: **0.2–1.1 ms per query**. Try it with `npm run kb:search 
 | Memoized answers in Redis, keyed by model + KB version + language + normalized question | Repeated factual questions answer in ~0 ms; invalidated automatically when the KB changes |
 | Debouncing (900 ms default) | "hi" + "u there?" + "need help" becomes one turn, not three replies |
 | Typing indicator refreshed every 20 s, blue ticks, ordered delivery per chat | Feels like a person on the other end |
-| Owner takeover | If you reply from your phone, the AI pauses in that chat for 30 min (configurable) |
+| Owner takeover | If you reply from your phone, the AI pauses in that chat for 30 s (configurable, in seconds) |
 | Instant command replies | Welcome/goodbye/help are templates (0 ms, no LLM); `/hi <question>` answers the question right after the welcome |
 | Context-window budgeting | System prompt + facts + reply budget are reserved first; the newest history that fits `historyTokens` and `num_ctx` is sent, never an overflowing prompt |
 | Conversation memory, 2 levels | **Short-term**: raw turns in Redis. **Long-term**: per-contact notes in Postgres, summarized from older turns and at session end — only while no reply is generating, so it never slows a chat |

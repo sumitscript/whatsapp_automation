@@ -106,7 +106,7 @@ test('history is passed through and long answers split into bubbles', async () =
 });
 
 test('history is trimmed to fit a small context window', async () => {
-  const llm = fakeLlm('sure', { numCtx: 1200 });
+  const llm = fakeLlm('sure', { numCtx: 1500 });
   const brain = createBrain({ kb, llm, ...createMemoryStores() });
   const history = Array.from({ length: 30 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `turn ${i} ` + 'x'.repeat(200) }));
   await run(brain, { text: 'continue', settings: { ...settings, historyTurns: 40, historyTokens: 6000 }, history });
@@ -158,4 +158,38 @@ test('empty model output falls back to a polite message', async () => {
   const { chunks } = await run(brain, { text: 'hmm', settings });
   assert.equal(chunks.length, 1);
   assert.match(chunks[0], /say it another way/);
+});
+
+test('"one more" after a joke stays a joke: no knowledge-base facts, history kept', async () => {
+  const llm = fakeLlm('Why did the scarecrow win an award? Outstanding in his field!');
+  const { memory, cache } = createMemoryStores();
+  const brain = createBrain({ kb, llm, memory, cache });
+  await memory.append('j1', [
+    { role: 'user', content: 'Tell me a joke' },
+    { role: 'assistant', content: "Why don't eggs tell jokes? They'd crack each other up!" },
+  ]);
+  const { done } = await run(brain, { chatId: 'j1', text: 'One more', settings });
+  const req = llm.calls[0];
+  assert.equal(done.meta.intent, 'joke');
+  assert.equal(done.meta.inheritedIntent, true);
+  assert.equal(done.meta.sources.length, 0);
+  assert.doesNotMatch(req.messages.at(-1).content, /\[Facts about me\]/);
+  assert.equal(req.messages.at(-2).role, 'assistant'); // the previous joke is in the prompt
+  assert.equal(req.messages.at(-3).content, 'Tell me a joke');
+});
+
+test('tiny general messages never pull knowledge-base facts', async () => {
+  const llm = fakeLlm('Sure!');
+  const { memory, cache } = createMemoryStores();
+  const brain = createBrain({ kb, llm, memory, cache });
+  const { done } = await run(brain, { chatId: 't1', text: 'ok cool', settings });
+  assert.equal(done.meta.sources.length, 0);
+});
+
+test('facts/notes come with a guard telling the model to answer the message', async () => {
+  const llm = fakeLlm('ok');
+  const { memory, cache } = createMemoryStores();
+  const brain = createBrain({ kb, llm, memory, cache });
+  await run(brain, { chatId: 'g1', text: 'hey whats up', settings, contactName: 'Ravi', longTermMemory: '- likes chess' });
+  assert.match(llm.calls[0].messages.at(-1).content, /ignore them and never bring them up/);
 });
