@@ -44,10 +44,24 @@ export async function mount(root, { params, hub, navigate }) {
   // ---------- chat list ----------
   const chatName = (c) => c?.name || displayPhone(c?.phone) || c?.chatId || 'Unknown';
 
+  // "typing" + three bouncing dots (reused by the chat list and the conversation header)
+  const TYPING_LABEL = '<span class="typing-text">typing<span class="typing-dots typing-dots-sm" aria-hidden="true"><i></i><i></i><i></i></span></span>';
+
+  // Animated bubble at the bottom of the thread while the AI is composing a reply.
+  function syncTypingBubble() {
+    const slot = $('#typing-slot', convEl);
+    if (!slot) return;
+    const on = !!s.activeId && s.typing.has(s.activeId);
+    if (on && !slot.firstChild) {
+      slot.innerHTML = '<div class="msg-row out is-new typing-row"><div class="bubble bubble-out pending" role="status" aria-label="Typing"><span class="typing-dots"><i></i><i></i><i></i></span></div></div>';
+      scrollToBottom();
+    } else if (!on) slot.innerHTML = '';
+  }
+
   function chatItem(c) {
     const typing = s.typing.has(c.chatId);
     const preview = typing
-      ? '<span class="typing-text">typing…</span>'
+      ? TYPING_LABEL
       : html`${raw(c.lastDirection === 'out' ? '<span class="tick">✓✓</span> ' : '')}${c.lastMessage || ''}`;
     return html`
       <li>
@@ -148,6 +162,7 @@ export async function mount(root, { params, hub, navigate }) {
       <div class="messages wallpaper" id="messages" tabindex="0" aria-label="Messages">
         <div class="load-older" id="load-older" hidden><div class="spinner spinner-sm"></div></div>
         <div id="message-list"></div>
+        <div id="typing-slot" aria-live="polite"></div>
       </div>
       <form class="composer" id="composer">
         <textarea id="composer-input" rows="1" placeholder="Type a message (sent as you, not the AI)" aria-label="Message"></textarea>
@@ -197,7 +212,7 @@ export async function mount(root, { params, hub, navigate }) {
     const c = activeChat();
     const typing = s.typing.has(c.chatId);
     const sub = typing
-      ? '<span class="typing-text">typing…</span>'
+      ? TYPING_LABEL
       : html`${displayPhone(c.phone) || c.chatId}${c.messageCount != null ? ` · ${c.messageCount} messages` : ''}`;
     header.innerHTML = html`
       <button class="icon-btn back-btn" id="conv-back" aria-label="Back to chats">${raw(icons.back)}</button>
@@ -462,6 +477,7 @@ export async function mount(root, { params, hub, navigate }) {
       s.messages = messages || [];
       s.hasMore = !!hasMore;
       renderMessages();
+      syncTypingBubble(); // chat opened while the AI is already typing
       scrollToBottom(true);
       if (!s.chats.some((c) => c.chatId === chatId)) loadChats();
     } catch (e) {
@@ -522,7 +538,10 @@ export async function mount(root, { params, hub, navigate }) {
       else s.typing.delete(chatId);
       const c = s.chats.find((x) => x.chatId === chatId);
       if (c) updateListItem(c);
-      if (chatId === s.activeId) renderHeader();
+      if (chatId === s.activeId) {
+        renderHeader();
+        syncTypingBubble();
+      }
     }),
     hub.on('socket:state', (st) => {
       if (st === 'connected') {
