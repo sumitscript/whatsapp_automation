@@ -1,0 +1,161 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { createBrain, createMemoryStores, selectHistory } from '../src/brain/pipeline.js';
+import { KnowledgeBase } from '../src/rag/kb.js';
+import { DEFAULT_SETTINGS } from '../src/core/settings-schema.js';
+
+const kb = await new KnowledgeBase({ dir: path.join(import.meta.dirname, 'fixtures', 'kb'), minScore: 0.5 }).load();
+const settings = { ...DEFAULT_SETTINGS, ownerName: 'Asha Rao', ownerAliases: 'asha', personaName: 'eAsha', model: 'fake:1b' };
+
+function fakeLlm(reply, { numCtx = 4096 } = {}) {
+  const calls = [];
+  return {
+    calls,
+    numCtx,
+    async *chat(req) {
+      calls.push(req);
+      for (const piece of reply.match(/.{1,7}/gs)) yield { type: 'token', text: piece };
+      yield { type: 'done', stats: { evalTokens: 10, evalMs: 500, promptTokens: 100, doneReason: 'stop' } };
+    },
+  };
+}
+
+async function run(brain, args) {
+  const chunks = [];
+  let done;
+  for await (const ev of brain.respond(args)) {
+    if (ev.type === 'chunk') chunks.push(ev.text);
+    else done = ev;
+  }
+  return { chunks, done };
+}
+
+test('speaks as the owner in first person, with facts and a language hint', async () => {
+  const llm = fakeLlm('I am a **backend engineer** at Acme Corp.');
+  const { memory, cache } = createMemoryStores();
+  const brain = createBrain({ kb, llm, memory, cache });
+  const { chunks, done } = await run(brain, { chatId: 'c1', text: 'Where does Asha work?', settings });
+  assert.deepEqual(chunks, ['I am a *backend engineer* at Acme Corp.']);
+  const req = llm.calls[0];
+  assert.equal(req.temperature, 0.3);
+  assert.match(req.messages[0].content, /You are eAsha — the virtual version of Asha/);
+  assert.match(req.messages.at(-1).content, /\[Facts about me\]/);
+  assert.match(req.messages.at(-1).content, /Reply in English/);
+  assert.equal(done.meta.intent, 'about_owner');
+  assert.ok(done.meta.sources.length > 0);
+  assert.equal((await memory.get('c1')).length, 2);
+});
+
+test('long-term memory and the contact name are injected', async () => {
+  const llm = fakeLlm('Hey Ravi! How did the interview go?');
+  const { memory, cache } = createMemoryStores();
+  const brain = createBrain({ kb, llm, memory, cache });
+  await run(brain, { chatId: 'm1', text: 'hey whats up', settings, contactName: 'Ravi', longTermMemory: '- Ravi had an interview at Globex' });
+  const last = llm.calls[0].messages.at(-1).content;
+  assert.match(last, /\[What I remember about Ravi\]\n- Ravi had an interview at Globex/);
+  assert.match(last, /\[Chatting with\] Ravi/);
+});
+
+test('memory is ignored when memoryEnabled is off', async () => {
+  const llm = fakeLlm('ok');
+  const brain = createBrain({ kb, llm, ...createMemoryStores() });
+  await run(brain, { chatId: 'm2', text: 'hello there friend', settings: { ...settings, memoryEnabled: false }, longTermMemory: 'secret' });
+  assert.doesNotMatch(llm.calls[0].messages.at(-1).content, /secret/);
+});
+
+test('repeated factual questions are served from the answer cache', async () => {
+  const llm = fakeLlm('Acme Corp.');
+  const { memory, cache } = createMemoryStores();
+  const brain = createBrain({ kb, llm, memory, cache });
+  await run(brain, { chatId: 'x', text: 'Where does Asha work?', settings });
+  const second = await run(brain, { chatId: 'y', text: 'where does asha work', settings });
+  assert.equal(llm.calls.length, 1);
+  assert.equal(second.done.meta.cached, true);
+  assert.deepEqual(second.chunks, ['Acme Corp.']);
+});
+
+test('changing the persona invalidates cached answers', async () => {
+  const llm = fakeLlm('Acme Corp.');
+  const { memory, cache } = createMemoryStores();
+  const brain = createBrain({ kb, llm, memory, cache });
+  await run(brain, { chatId: 'x', text: 'Where does Asha work?', settings });
+  await run(brain, { chatId: 'x', text: 'Where does Asha work?', settings: { ...settings, personaName: 'AshaBot' } });
+  assert.equal(llm.calls.length, 2);
+});
+
+test('chit-chat skips retrieval and uses a playful temperature', async () => {
+  const llm = fakeLlm('Haha, good one!');
+  const brain = createBrain({ kb, llm, ...createMemoryStores() });
+  const { done } = await run(brain, { chatId: 'c2', text: 'haha you are funny 😂', settings });
+  assert.equal(done.meta.intent, 'joke');
+  assert.equal(llm.calls[0].temperature, 0.9);
+  assert.doesNotMatch(llm.calls[0].messages.at(-1).content, /Facts about me/);
+});
+
+test('history is passed through and long answers split into bubbles', async () => {
+  const llm = fakeLlm('Recursion is when a function calls itself to solve a smaller piece of the problem.\n\nSecond part of the answer.');
+  const brain = createBrain({ kb, llm, ...createMemoryStores() });
+  const history = [
+    { role: 'user', content: 'hi' },
+    { role: 'assistant', content: 'hello!' },
+  ];
+  const { chunks } = await run(brain, { text: 'explain recursion please', settings, history });
+  assert.equal(chunks.length, 2);
+  assert.deepEqual(llm.calls[0].messages.slice(1, 3), history);
+});
+
+test('history is trimmed to fit a small context window', async () => {
+  const llm = fakeLlm('sure', { numCtx: 1200 });
+  const brain = createBrain({ kb, llm, ...createMemoryStores() });
+  const history = Array.from({ length: 30 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `turn ${i} ` + 'x'.repeat(200) }));
+  await run(brain, { text: 'continue', settings: { ...settings, historyTurns: 40, historyTokens: 6000 }, history });
+  const sent = llm.calls[0].messages.slice(1, -1);
+  assert.ok(sent.length > 0 && sent.length < 30);
+  assert.match(sent.at(-1).content, /turn 29/); // newest turns are kept
+});
+
+test('selectHistory caps, starts on a user turn and merges same-role runs', () => {
+  const turns = [
+    { role: 'assistant', content: 'welcome!' },
+    { role: 'user', content: 'a' },
+    { role: 'assistant', content: 'b' },
+    { role: 'assistant', content: 'c (owner from phone)' },
+    { role: 'user', content: 'd' },
+  ];
+  const { history } = selectHistory(turns, { maxMessages: 10, maxTokens: 1000 });
+  assert.deepEqual(history.map((t) => t.role), ['user', 'assistant', 'user']);
+  assert.equal(history[1].content, 'b\nc (owner from phone)');
+  assert.equal(selectHistory(turns, { maxMessages: 2, maxTokens: 1000 }).history.length, 1);
+});
+
+test('summarize folds turns into memory notes', async () => {
+  const llm = fakeLlm('- Ravi is preparing for interviews\n- Prefers Hinglish');
+  const brain = createBrain({ kb, llm, ...createMemoryStores() });
+  const notes = await brain.summarize({
+    previous: '- Ravi is a college friend',
+    turns: [
+      { role: 'user', content: 'bhai interview prep kaise karu' },
+      { role: 'assistant', content: 'DSA + projects pe focus kar' },
+    ],
+    contactName: 'Ravi',
+    settings,
+  });
+  assert.match(notes, /interviews/);
+  const prompt = llm.calls[0].messages.at(-1).content;
+  assert.match(prompt, /Existing notes:\n- Ravi is a college friend/);
+  assert.match(prompt, /Them: bhai interview prep/);
+  assert.equal(llm.calls[0].temperature, 0.2);
+});
+
+test('empty model output falls back to a polite message', async () => {
+  const llm = {
+    async *chat() {
+      yield { type: 'done', stats: {} };
+    },
+  };
+  const brain = createBrain({ kb, llm, ...createMemoryStores() });
+  const { chunks } = await run(brain, { text: 'hmm', settings });
+  assert.equal(chunks.length, 1);
+  assert.match(chunks[0], /say it another way/);
+});

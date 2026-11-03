@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint + unit tests
+    runs-on: ubuntu-latest
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi
+      - name: Syntax check
+        run: npm run lint
+      - name: Unit tests
+        run: npm test
+      - name: Knowledge base indexes cleanly
+        run: node scripts/kb-search.js "where does he work"
+
+  integration:
+    name: Boot smoke test (Postgres + Redis)
+    runs-on: ubuntu-latest
+    needs: test
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env: { POSTGRES_USER: wa, POSTGRES_PASSWORD: wa, POSTGRES_DB: wa }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U wa" --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+      DATABASE_URL: postgres://wa:wa@localhost:5432/wa
+      REDIS_URL: redis://localhost:6379
+      BUS_DRIVER: redis
+      WA_AUTO_CONNECT: 'false'
+      ADMIN_USERNAME: ci
+      ADMIN_PASSWORD: ci-password-123
+      OLLAMA_URL: http://localhost:11434
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi
+      - name: Start gateway and exercise the API
+        run: |
+          node src/gateway/index.js > gateway.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS localhost:3000/readyz && break; sleep 1; done
+          curl -fsS localhost:3000/readyz
+          # login → cookie → authenticated calls
+          curl -fsS -c jar -H 'content-type: application/json' \
+            -d '{"username":"ci","password":"ci-password-123"}' localhost:3000/api/auth/login
+          curl -fsS -b jar localhost:3000/api/auth/me
+          curl -fsS -b jar localhost:3000/api/wa/status
+          curl -fsS -b jar localhost:3000/api/settings
+          curl -fsS -b jar localhost:3000/api/contacts
+          curl -fsS -b jar 'localhost:3000/api/sessions?active=true&limit=5'
+          curl -fsS -b jar localhost:3000/api/settings | grep -q '"replyMode":"session"'
+          curl -fsS -b jar -X POST -H 'content-type: application/json' -d '{"query":"projects"}' localhost:3000/api/kb/search
+          curl -fsS -b jar localhost:3000/api/stats
+          curl -fsS -b jar 'localhost:3000/api/logs?limit=5'
+          # unauthenticated access must be rejected
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:3000/api/chats)" = "401"
+          curl -fsS localhost:3000/ | grep -q '<title>'
+      - name: Gateway log
+        if: always()
+        run: cat gateway.log || true
+
+  docker:
+    name: Docker build + compose validation
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose file
+        run: |
+          cp .env.example .env
+          sed -i 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci/; s/^JWT_SECRET=.*/JWT_SECRET=ci/' .env
+          docker compose config -q
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: whatsapp-ai:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

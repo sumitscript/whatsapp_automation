@@ -1,0 +1,169 @@
+# Production stack for one KVM (tuned for 8 vCPU / 32 GB RAM, CPU-only).
+#   docker compose up -d            (uses COMPOSE_PROFILES from .env; "kafka" by default)
+# Only Caddy is published to the internet. Ollama, Postgres, Redis and Kafka
+# stay on the private network.
+
+x-app: &app
+  image: ${APP_IMAGE:-whatsapp-ai:local}
+  build: .
+  restart: unless-stopped
+  env_file: .env
+  environment: &app-env
+    NODE_ENV: production
+    DATABASE_URL: postgres://${POSTGRES_USER:-wa}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-wa}
+    REDIS_URL: redis://redis:6379
+    KAFKA_BROKERS: kafka:9092
+    OLLAMA_URL: http://ollama:11434
+  volumes:
+    - ./knowledge_base:/app/knowledge_base # edit from the console or git; hot-reloads
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+  logging:
+    driver: json-file
+    options: { max-size: '20m', max-file: '5' }
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports: ['80:80', '443:443', '443:443/udp']
+    environment:
+      DOMAIN: ${DOMAIN:-:80}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [gateway]
+    deploy:
+      resources:
+        limits: { memory: 256m }
+
+  gateway:
+    <<: *app
+    environment:
+      <<: *app-env
+      SERVICE_NAME: gateway
+      PORT: '3000'
+    command: ['node', 'src/gateway/index.js']
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy, required: false } # ignored when the kafka profile is off
+    shm_size: 1gb # Chromium needs more than Docker's 64 MB default
+    volumes:
+      - ./knowledge_base:/app/knowledge_base
+      - wa_session:/app/.wwebjs_auth
+      - wa_cache:/app/.wwebjs_cache
+    deploy:
+      resources:
+        limits: { memory: 2g }
+
+  worker:
+    <<: *app
+    environment:
+      <<: *app-env
+      SERVICE_NAME: worker
+      PORT: '3001'
+      WORKER_HEALTH_PORT: '3001'
+    command: ['node', 'src/worker/index.js']
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      ollama: { condition: service_started }
+      kafka: { condition: service_healthy, required: false }
+    deploy:
+      resources:
+        limits: { memory: 768m }
+
+  ollama:
+    image: ollama/ollama:${OLLAMA_VERSION:-0.12.6} # pinned: same Ollama on every deploy; bump deliberately
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_KEEP_ALIVE: '-1' # model stays in RAM → no cold starts
+      OLLAMA_NUM_PARALLEL: ${LLM_CONCURRENCY:-2}
+      OLLAMA_MAX_LOADED_MODELS: '1'
+      OLLAMA_FLASH_ATTENTION: '1'
+      OLLAMA_KV_CACHE_TYPE: q8_0 # half the KV-cache RAM, negligible quality loss
+    volumes:
+      - ollama_models:/root/.ollama
+    deploy:
+      resources:
+        limits: { memory: 20g }
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-wa}
+    command: ['postgres', '-c', 'shared_buffers=256MB', '-c', 'max_connections=50']
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-wa} -d ${POSTGRES_DB:-wa}']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    deploy:
+      resources:
+        limits: { memory: 1g }
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    # AOF so short-term memory + answer cache survive restarts; never evict
+    # conversation context (keys carry their own TTLs).
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory', '512mb', '--maxmemory-policy', 'volatile-lru']
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    deploy:
+      resources:
+        limits: { memory: 768m }
+
+  kafka:
+    image: apache/kafka:3.9.1
+    profiles: ['kafka'] # BUS_DRIVER=redis runs without it
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 72
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ['CMD-SHELL', '/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1']
+      interval: 10s
+      timeout: 10s
+      retries: 30
+    deploy:
+      resources:
+        limits: { memory: 1g }
+
+volumes:
+  caddy_data:
+  caddy_config:
+  wa_session:
+  wa_cache:
+  ollama_models:
+  pg_data:
+  redis_data:
+  kafka_data:

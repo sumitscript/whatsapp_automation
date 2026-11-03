@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111b21" />
+    <meta name="color-scheme" content="dark light" />
+    <title>eSumit Console</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='11' fill='%2300a884'/%3E%3Cpath d='M7.5 16.5l.8-2.6A5 5 0 1 1 10 15.7z' fill='none' stroke='white' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/css/app.css" />
+    <script src="/js/theme.js"></script>
+    <script type="module" src="/js/app.js"></script>
+    <!-- fetch the core modules in parallel instead of discovering them one import at a time -->
+    <link rel="modulepreload" href="/js/api.js" />
+    <link rel="modulepreload" href="/js/util.js" />
+    <link rel="modulepreload" href="/js/icons.js" />
+    <link rel="modulepreload" href="/js/socket.js" />
+    <!-- Socket.IO client is loaded lazily after sign-in (js/socket.js) -->
+  </head>
+  <body>
+    <noscript>This admin console needs JavaScript enabled.</noscript>
+    <div class="boot"><div class="spinner" aria-label="Loading"></div></div>
+  </body>
+</html>

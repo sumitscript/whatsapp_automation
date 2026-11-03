@@ -1,0 +1,818 @@
+{
+  "naukri": [
+    "job",
+    "work",
+    "experience",
+    "employer"
+  ],
+  "kaam": [
+    "work",
+    "job",
+    "experience"
+  ],
+  "office": [
+    "work",
+    "company",
+    "exxat"
+  ],
+  "company": [
+    "work",
+    "employer",
+    "experience"
+  ],
+  "kampani": [
+    "company",
+    "work"
+  ],
+  "padhai": [
+    "education",
+    "study",
+    "college"
+  ],
+  "padhta": [
+    "education",
+    "study",
+    "college"
+  ],
+  "padhte": [
+    "education",
+    "study",
+    "college"
+  ],
+  "college": [
+    "education",
+    "university",
+    "parul"
+  ],
+  "collage": [
+    "college",
+    "education"
+  ],
+  "kolej": [
+    "college",
+    "education"
+  ],
+  "university": [
+    "education",
+    "college",
+    "parul"
+  ],
+  "uni": [
+    "university",
+    "education"
+  ],
+  "degree": [
+    "education",
+    "btech"
+  ],
+  "marks": [
+    "cgpa",
+    "grades",
+    "education"
+  ],
+  "pointer": [
+    "cgpa",
+    "grades"
+  ],
+  "gpa": [
+    "cgpa",
+    "grades"
+  ],
+  "percentage": [
+    "cgpa",
+    "score"
+  ],
+  "project": [
+    "projects",
+    "built"
+  ],
+  "banaya": [
+    "built",
+    "projects"
+  ],
+  "banaye": [
+    "built",
+    "projects"
+  ],
+  "bnaya": [
+    "built",
+    "projects"
+  ],
+  "kya": [
+    "what"
+  ],
+  "kaun": [
+    "who"
+  ],
+  "kon": [
+    "who"
+  ],
+  "kahan": [
+    "where",
+    "location"
+  ],
+  "kaha": [
+    "where",
+    "location"
+  ],
+  "kab": [
+    "when"
+  ],
+  "kaise": [
+    "how"
+  ],
+  "kitna": [
+    "how",
+    "much"
+  ],
+  "kitne": [
+    "how",
+    "many"
+  ],
+  "rehta": [
+    "location",
+    "based"
+  ],
+  "rehte": [
+    "location",
+    "based"
+  ],
+  "jagah": [
+    "location",
+    "place"
+  ],
+  "sheher": [
+    "location",
+    "city"
+  ],
+  "shahar": [
+    "location",
+    "city"
+  ],
+  "skill": [
+    "skills"
+  ],
+  "aata": [
+    "skills",
+    "know"
+  ],
+  "jaanta": [
+    "skills",
+    "know"
+  ],
+  "bhasha": [
+    "language",
+    "programming"
+  ],
+  "language": [
+    "languages",
+    "programming"
+  ],
+  "seekha": [
+    "learning",
+    "learned"
+  ],
+  "sikha": [
+    "learning",
+    "learned"
+  ],
+  "seekhna": [
+    "learning"
+  ],
+  "sapna": [
+    "dream",
+    "goals"
+  ],
+  "shauk": [
+    "hobbies",
+    "interests"
+  ],
+  "hobby": [
+    "hobbies",
+    "interests",
+    "personal"
+  ],
+  "mazedaar": [
+    "fun",
+    "facts"
+  ],
+  "funny": [
+    "fun",
+    "facts"
+  ],
+  "dost": [
+    "friends",
+    "personal"
+  ],
+  "jeeta": [
+    "achievements",
+    "awards",
+    "won"
+  ],
+  "jeete": [
+    "achievements",
+    "awards",
+    "won"
+  ],
+  "inaam": [
+    "awards",
+    "achievements"
+  ],
+  "award": [
+    "awards",
+    "achievements"
+  ],
+  "certificate": [
+    "certifications",
+    "certificate"
+  ],
+  "certi": [
+    "certifications"
+  ],
+  "sir": [
+    "mentor",
+    "teacher"
+  ],
+  "guru": [
+    "mentor",
+    "teacher"
+  ],
+  "teacher": [
+    "mentor",
+    "teacher",
+    "faculty"
+  ],
+  "contact": [
+    "contact",
+    "reach",
+    "links"
+  ],
+  "sampark": [
+    "contact",
+    "reach"
+  ],
+  "number": [
+    "contact",
+    "phone"
+  ],
+  "link": [
+    "links",
+    "website",
+    "contact"
+  ],
+  "insta": [
+    "social",
+    "contact"
+  ],
+  "hire": [
+    "hiring",
+    "available",
+    "open",
+    "work"
+  ],
+  "available": [
+    "availability",
+    "open",
+    "work"
+  ],
+  "intro": [
+    "introduction",
+    "profile",
+    "about"
+  ],
+  "parichay": [
+    "introduction",
+    "profile",
+    "about"
+  ],
+  "baare": [
+    "about",
+    "profile"
+  ],
+  "nokri": [
+    "job",
+    "work"
+  ],
+  "exat": [
+    "exxat"
+  ],
+  "exxat": [
+    "exxat",
+    "work",
+    "product",
+    "analyst"
+  ],
+  "iamneo": [
+    "iamneo",
+    "niit",
+    "trainee"
+  ],
+  "neo": [
+    "iamneo",
+    "neoai"
+  ],
+  "niit": [
+    "iamneo",
+    "niit"
+  ],
+  "parul": [
+    "parul",
+    "university",
+    "education"
+  ],
+  "pit": [
+    "parul",
+    "institute",
+    "technology"
+  ],
+  "neoai": [
+    "neoai",
+    "whatsapp",
+    "bot",
+    "iamneo"
+  ],
+  "faah": [
+    "faahhh",
+    "extension",
+    "vscode"
+  ],
+  "faaah": [
+    "faahhh",
+    "extension",
+    "vscode"
+  ],
+  "fahh": [
+    "faahhh",
+    "extension",
+    "vscode"
+  ],
+  "faahh": [
+    "faahhh",
+    "extension",
+    "vscode"
+  ],
+  "extension": [
+    "extension",
+    "vscode",
+    "faahhh"
+  ],
+  "railway": [
+    "train",
+    "traffic",
+    "konkan"
+  ],
+  "train": [
+    "train",
+    "traffic",
+    "railway"
+  ],
+  "dna": [
+    "dna",
+    "sequence",
+    "matcher",
+    "bioinformatics"
+  ],
+  "gesture": [
+    "gesture",
+    "hand",
+    "opencv",
+    "mediapipe"
+  ],
+  "hackathon": [
+    "hackathon",
+    "sharda",
+    "pmgd"
+  ],
+  "samsung": [
+    "samsung",
+    "solve",
+    "tomorrow"
+  ],
+  "sft": [
+    "samsung",
+    "solve",
+    "tomorrow"
+  ],
+  "nptel": [
+    "nptel",
+    "swayam",
+    "iot"
+  ],
+  "covid": [
+    "covid",
+    "helpdesk",
+    "hindustan"
+  ],
+  "newspaper": [
+    "hindustan",
+    "news",
+    "featured"
+  ],
+  "akhbar": [
+    "newspaper",
+    "hindustan",
+    "news",
+    "featured"
+  ],
+  "js": [
+    "javascript"
+  ],
+  "ts": [
+    "typescript"
+  ],
+  "py": [
+    "python"
+  ],
+  "cpp": [
+    "c++",
+    "cpp"
+  ],
+  "c++": [
+    "cpp"
+  ],
+  "dsa": [
+    "data",
+    "structures",
+    "algorithms"
+  ],
+  "algo": [
+    "algorithms"
+  ],
+  "lld": [
+    "low",
+    "level",
+    "design"
+  ],
+  "hld": [
+    "design",
+    "architecture"
+  ],
+  "oop": [
+    "object",
+    "oriented",
+    "programming"
+  ],
+  "oops": [
+    "object",
+    "oriented",
+    "programming"
+  ],
+  "genai": [
+    "generative",
+    "ai"
+  ],
+  "gen": [
+    "generative"
+  ],
+  "ai": [
+    "ai",
+    "llm",
+    "generative"
+  ],
+  "ml": [
+    "machine",
+    "learning"
+  ],
+  "llm": [
+    "llm",
+    "ai",
+    "ollama"
+  ],
+  "rag": [
+    "retrieval",
+    "augmented",
+    "generation",
+    "rag"
+  ],
+  "cv": [
+    "computer",
+    "vision",
+    "resume"
+  ],
+  "resume": [
+    "profile",
+    "experience",
+    "skills"
+  ],
+  "biodata": [
+    "profile",
+    "about"
+  ],
+  "nextjs": [
+    "next.js",
+    "nextjs"
+  ],
+  "next": [
+    "next.js",
+    "nextjs"
+  ],
+  "reactjs": [
+    "react"
+  ],
+  "node": [
+    "node.js",
+    "nodejs"
+  ],
+  "nodejs": [
+    "node.js",
+    "node"
+  ],
+  "mongo": [
+    "mongodb"
+  ],
+  "db": [
+    "database",
+    "mongodb",
+    "sql"
+  ],
+  "sql": [
+    "sql",
+    "mysql",
+    "database"
+  ],
+  "api": [
+    "api",
+    "rest",
+    "graphql"
+  ],
+  "aws": [
+    "aws",
+    "cloud"
+  ],
+  "k8s": [
+    "kubernetes"
+  ],
+  "mern": [
+    "mern",
+    "mongodb",
+    "express",
+    "react",
+    "node",
+    "codehostage"
+  ],
+  "fullstack": [
+    "full-stack",
+    "frontend",
+    "backend"
+  ],
+  "frontend": [
+    "frontend",
+    "react",
+    "nextjs"
+  ],
+  "backend": [
+    "backend",
+    "node",
+    "fastapi",
+    "flask"
+  ],
+  "android": [
+    "android",
+    "mobile",
+    "app"
+  ],
+  "app": [
+    "app",
+    "application"
+  ],
+  "iot": [
+    "internet",
+    "things",
+    "nptel"
+  ],
+  "vscode": [
+    "vs",
+    "code",
+    "extension"
+  ],
+  "github": [
+    "github",
+    "repositories"
+  ],
+  "repo": [
+    "repository",
+    "github"
+  ],
+  "linkedin": [
+    "linkedin",
+    "contact"
+  ],
+  "portfolio": [
+    "portfolio",
+    "website",
+    "sumitscript"
+  ],
+  "website": [
+    "website",
+    "portfolio"
+  ],
+  "security": [
+    "security",
+    "encryption",
+    "vulnerability"
+  ],
+  "hacking": [
+    "security",
+    "vulnerability"
+  ],
+  "bug": [
+    "vulnerability",
+    "security"
+  ],
+  "encryption": [
+    "encryption",
+    "dpapi"
+  ],
+  "leetcode": [
+    "leetcode",
+    "dsa",
+    "learn",
+    "public"
+  ],
+  "sumeet": [
+    "sumit"
+  ],
+  "sumith": [
+    "sumit"
+  ],
+  "सुमित": [
+    "sumit"
+  ],
+  "नौकरी": [
+    "job",
+    "work",
+    "experience"
+  ],
+  "काम": [
+    "work",
+    "job",
+    "experience"
+  ],
+  "कंपनी": [
+    "company",
+    "work"
+  ],
+  "ऑफिस": [
+    "office",
+    "work"
+  ],
+  "पढ़ाई": [
+    "education",
+    "study"
+  ],
+  "कॉलेज": [
+    "college",
+    "education"
+  ],
+  "विश्वविद्यालय": [
+    "university",
+    "education"
+  ],
+  "डिग्री": [
+    "degree",
+    "education"
+  ],
+  "प्रोजेक्ट": [
+    "projects"
+  ],
+  "परियोजना": [
+    "projects"
+  ],
+  "बनाया": [
+    "built",
+    "projects"
+  ],
+  "कौशल": [
+    "skills"
+  ],
+  "स्किल्स": [
+    "skills"
+  ],
+  "भाषा": [
+    "language",
+    "programming"
+  ],
+  "प्रमाणपत्र": [
+    "certifications",
+    "certificate"
+  ],
+  "उपलब्धि": [
+    "achievements"
+  ],
+  "पुरस्कार": [
+    "awards",
+    "achievements"
+  ],
+  "संपर्क": [
+    "contact"
+  ],
+  "लिंक": [
+    "links",
+    "contact"
+  ],
+  "वेबसाइट": [
+    "website",
+    "portfolio"
+  ],
+  "शिक्षक": [
+    "mentor",
+    "teacher"
+  ],
+  "गुरु": [
+    "mentor",
+    "teacher"
+  ],
+  "कौन": [
+    "who"
+  ],
+  "क्या": [
+    "what"
+  ],
+  "कहाँ": [
+    "where",
+    "location"
+  ],
+  "कहां": [
+    "where",
+    "location"
+  ],
+  "कब": [
+    "when"
+  ],
+  "कैसे": [
+    "how"
+  ],
+  "सपना": [
+    "dream",
+    "goals"
+  ],
+  "शौक": [
+    "hobbies",
+    "interests"
+  ],
+  "परिचय": [
+    "introduction",
+    "profile",
+    "about"
+  ],
+  "सुरक्षा": [
+    "security"
+  ],
+  "लेख": [
+    "articles",
+    "writing"
+  ],
+  "work": [
+    "job",
+    "experience",
+    "company",
+    "role"
+  ],
+  "working": [
+    "job",
+    "experience",
+    "company",
+    "role"
+  ],
+  "works": [
+    "job",
+    "experience",
+    "company",
+    "role"
+  ],
+  "job": [
+    "work",
+    "experience",
+    "company",
+    "role"
+  ],
+  "employed": [
+    "job",
+    "experience",
+    "company"
+  ],
+  "currently": [
+    "present",
+    "current"
+  ],
+  "now": [
+    "present",
+    "current"
+  ],
+  "abhi": [
+    "present",
+    "current"
+  ],
+  "karte ho": [
+    "work",
+    "job"
+  ],
+  "करते हो": [
+    "work",
+    "job"
+  ],
+  "करते हैं": [
+    "work",
+    "job"
+  ]
+}

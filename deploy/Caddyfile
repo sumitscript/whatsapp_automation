@@ -1,0 +1,16 @@
+# DOMAIN=wa.example.com → automatic HTTPS (Let's Encrypt).
+# DOMAIN=:80            → plain HTTP on the server IP (testing only).
+{$DOMAIN} {
+	encode zstd gzip
+
+	# WebSockets (Socket.IO) are proxied transparently.
+	reverse_proxy gateway:3000 {
+		health_uri /healthz
+		health_interval 15s
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

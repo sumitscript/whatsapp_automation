@@ -1,12 +1,12 @@
-# Python virtual environment
-venv/
-__pycache__/
-*.pyc
+node_modules/
+.env
+.env.*
+!.env.example
 
-# WhatsApp web cache and chat logs
-.wwebjs_cache/
+# WhatsApp session + cache (secrets: they log in as you)
 .wwebjs_auth/
-messages.txt
+.wwebjs_cache/
 
-# Vector Database (Local ChromaDB)
-chroma_db/
+
+*.log
+backups/
