@@ -8,6 +8,9 @@ const GREETING = /^(hi+|hello+|hey+|hii+|helo|hlo|yo|sup|namaste|namaskar|namask
 const THANKS = /\b(thanks|thank you|thx|ty|dhanyavaad|dhanyawad|shukriya|thnx|शुक्रिया|धन्यवाद)\b/i;
 const JOKE = /(😂|🤣|😆|😜|😝|😹|😅|\bha(ha)+\b|\bhe(he)+\b|\blo+l\b|\blmao\b|\brofl\b|\bjoke\b|\bjokes\b|\bfunny\b|\bmeme\b|\bmazak\b|\bmajak\b|\bmasti\b|\bchutkula\b|\bpj\b|\broast\b|मज़ाक|चुटकुला)/i;
 const CODE = /(```|\b(code|coding|function|bug|debug|error|exception|stack ?trace|compile|syntax|regex|sql|query|api|endpoint|python|javascript|typescript|java|c\+\+|cpp|golang|rust|react|node|express|django|flask|fastapi|docker|kubernetes|git|leetcode|algorithm|complexity|recursion|array|linked list|class|object|async|promise|npm|pip)\b|[{};]\s*$|=>|\bdef\s+\w+\(|\bconsole\.log\b)/i;
+// Fiction / creative writing: no KB facts, no notes, more creative, longer.
+const CREATIVE = /\b(story|stories|kahani|kahaani|kahaniya|poem|poems|poetry|shayari|shayri|kavita|fiction|fictional|horror|thriller|fairy ?tale|bedtime|fable|rap|haiku|limerick|sonnet|ghazal|once upon|imagine a|write a scene|screenplay|plot twist)\b|कहानी|कविता|शायरी/i;
+const ABOUT_YOU = /\b(about (you|yourself|u)|how (you|u|tum|aap)|when (you|u|tum|aap)|why (you|u|tum|aap)|apne baare|tumhare baare|aapke baare|khud ke baare)\b/i;
 const MATH = /^[\d\s+\-*/().%^=x×÷]+$|\d\s*[+\-*/×÷^%]\s*\d|\b(calculate|solve|integral|derivative|equation|percent of|kitna hota)\b/i;
 const OWNER_WORDS = /\b(you|your|yours|u|ur|tum|tumhara|tumhari|aap|aapka|aapki|tera|teri|he|his|him|uska|uski|unka|unki)\b/i;
 const OWNER_POSSESSIVE = /\b(your|yours|ur|tumhara|tumhari|tumhare|aapka|aapki|aapke|tera|teri|tere|his|uska|uski|unka|unki)\b/i;
@@ -39,7 +42,7 @@ function hasProfileWord(lower) {
  * no profile topic, so it stays general.
  * @param {string} text
  * @param {{ ownerAliases?: string[] }} [opts]
- * @returns {'greeting'|'thanks'|'joke'|'coding'|'math'|'about_owner'|'general'}
+ * @returns {'greeting'|'thanks'|'joke'|'creative'|'coding'|'math'|'about_owner'|'general'}
  */
 export function classifyIntent(text, { ownerAliases = [] } = {}) {
   const s = String(text ?? '').trim();
@@ -57,6 +60,10 @@ export function classifyIntent(text, { ownerAliases = [] } = {}) {
     const aboutThem = USER_WORDS.test(lower);
     if (OWNER_POSSESSIVE.test(lower) || (!aboutThem && (OWNER_WORDS.test(lower) || words.length <= 6))) return 'about_owner';
   }
+  // Before coding: "write a story about a python" is fiction, not code.
+  // "your story" / "story of how you built X" is my real life (facts), not fiction;
+  // "can you tell me a story" is fiction.
+  if (CREATIVE.test(lower)) return OWNER_POSSESSIVE.test(lower) || ABOUT_YOU.test(lower) ? 'about_owner' : 'creative';
   if (CODE.test(s)) return 'coding';
   if (MATH.test(lower) && /\d/.test(lower)) return 'math';
   if (JOKE.test(s)) return 'joke';
@@ -70,6 +77,7 @@ export const INTENT_PROFILES = Object.freeze({
   greeting: { temperature: 0.7, tokenScale: 0.4, useKb: false },
   thanks: { temperature: 0.7, tokenScale: 0.3, useKb: false },
   joke: { temperature: 0.9, tokenScale: 0.6, useKb: false },
+  creative: { temperature: 0.95, tokenScale: 2.2, useKb: false },
   coding: { temperature: 0.2, tokenScale: 2.5, useKb: false },
   math: { temperature: 0.1, tokenScale: 0.8, useKb: false },
   about_owner: { temperature: 0.3, tokenScale: 1, useKb: true },

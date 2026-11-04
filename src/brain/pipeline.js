@@ -6,7 +6,7 @@
 // Prompt layout (keeps Ollama's KV-cache prefix stable across turns):
 //   [system: persona]  [history …]  [user: facts + memory + who + message + language hint]
 import { INTENT_PROFILES, isFollowUp, resolveIntent } from './intent.js';
-import { replyLanguage } from './lang.js';
+import { replyLanguage, statedLanguagePreference } from './lang.js';
 import { MessageChunker } from './format.js';
 import { estimateTokens, normalize } from '../rag/text.js';
 import { ownerAliasList, renderPersona } from '../core/settings-schema.js';
@@ -17,6 +17,29 @@ const SAFETY_TOKENS = 256;
 const REFERS_TO_PAST = /\b(remember|recall|last time|earlier|before|previously|already told|i told you|yaad|pichli baar|pichhli baar|pehle|kal|bataya tha|याद|पिछली)\b/i;
 const WANTS_ANSWER =
   /\b(not sure|no idea|don'?t know|dont know|idk|tell me the (correct |right )?answer|give me the (correct |right )?answer|(correct|right) answer|just tell me|solution batao|answer batao|pata nahi|nahi pata|nhi pata|bata do|samjha do)\b/i;
+
+const COMPACT_ASSISTANT = 600;
+const COMPACT_USER = 1200;
+/**
+ * Shorten an old turn for the prompt: keep its start and end (where offers and questions
+ * live). Deterministic, so the history prefix stays identical turn to turn and Ollama's
+ * prompt cache keeps working.
+ */
+export function compactTurn(t) {
+  const max = t.role === 'assistant' ? COMPACT_ASSISTANT : COMPACT_USER;
+  const s = String(t.content ?? '');
+  if (s.length <= max) return s;
+  if (/```/.test(s) && t.role === 'user') return s.slice(0, max); // their code: the start matters
+  const head = s.slice(0, Math.round(max * 0.6)).replace(/\s+\S*$/, '');
+  const tail = s.slice(-Math.round(max * 0.3)).replace(/^\S*\s+/, '');
+  return `${head} […] ${tail}`;
+}
+
+/** "minimum 200 words", "300 shabd mein" → 200 / 300 (capped at 800), else null. */
+export function requestedWords(text) {
+  const m = String(text ?? '').match(/\b(\d{2,4})\s*(?:\+\s*)?(?:words?|shabd|शब्द)\b/i);
+  return m ? Math.min(Number(m[1]), 800) : null;
+}
 
 /** "yes", "ok sure", "haan bhai", "no", "go on" — a reply to my last message rather than a new topic. */
 export function isShortReply(text) {
@@ -48,10 +71,13 @@ export function selectHistory(turns, { maxMessages, maxTokens }) {
   let used = 0;
   for (let i = turns.length - 1; i >= 0 && picked.length < maxMessages; i--) {
     const t = turns[i];
-    const cost = estimateTokens(t.content) + 4;
+    // The newest turn stays whole (a "yes" may refer to its last line); older long replies are
+    // shortened, which keeps prompt evaluation fast on CPU and stops old stories anchoring new ones.
+    const content = i === turns.length - 1 ? t.content : compactTurn(t);
+    const cost = estimateTokens(content) + 4;
     if (used + cost > maxTokens) break;
     used += cost;
-    picked.unshift({ role: t.role, content: t.content });
+    picked.unshift({ role: t.role, content });
   }
   while (picked.length && picked[0].role !== 'user') picked.shift(); // start on a user turn
   const merged = [];
@@ -66,39 +92,52 @@ export function selectHistory(turns, { maxMessages, maxTokens }) {
 export function createBrain({ kb, llm, memory, cache, logger }) {
   const log = logger?.child({ component: 'brain' });
 
-  function buildUserTurn({ text, lang, retrieval, intent, contactName, longTerm, owner, replyTo, refersToPast, hadNotes, askedQuestionLast, wantsAnswer }) {
+  // These blocks sit inside the *user* message, where "me/my" naturally reads as the
+  // user. Every label therefore says explicitly whose information it is — with
+  // "[Facts about me]" a 4B model credited the owner's projects to the contact and
+  // retold the contact's interview prep as its own life.
+  function buildUserTurn({ text, lang, retrieval, intent, contactName, longTerm, owner, replyTo, refersToPast, hadNotes, askedQuestionLast, wantsAnswer, wordTarget }) {
     const parts = [];
+    const them = contactName || 'them';
     const hasFacts = !!retrieval?.sections.length;
-    if (hasFacts) parts.push(`[Facts about me]\n${retrieval.context}`);
-    else if (intent === 'about_owner') parts.push(`[Facts about me]\n(none match — don't guess; say the real ${owner} can answer that one)`);
+    const factsLabel = `[My facts — about ${owner}, the one replying (me). Not about ${them}]`;
+    if (hasFacts) parts.push(`${factsLabel}\n${retrieval.context}`);
+    else if (intent === 'about_owner') parts.push(`${factsLabel}\n(none match — don't guess; say the real ${owner} can answer that one)`);
     if (longTerm) {
-      parts.push(`[What I remember about ${contactName || 'them'}]\n(from our earlier chats — use it when it helps, e.g. they continue a topic or mention last time; don't recite it)\n${longTerm}`);
+      parts.push(`[Notes about ${them} — the person I'm chatting with. Their life, not mine]\n(from our earlier chats — use it when it helps, e.g. they continue a topic or mention last time; don't recite it)\n${longTerm}`);
     }
     if (contactName) {
       // Testing from a phone named like the owner made the model think it was talking to itself.
       const sameAsOwner = contactName.split(/\s+/)[0].toLowerCase() === owner.toLowerCase();
-      parts.push(`[Chatting with] ${contactName} (their WhatsApp name${sameAsOwner ? ` — a different person from me` : ''}; if they told me another name, use that)`);
+      parts.push(`[I'm chatting with] ${contactName} (their WhatsApp name${sameAsOwner ? ` — a different person from me` : ''}; if they told me another name, use that)`);
     }
     // "yes" / "ok" / "haan" only make sense next to what I just asked; small models
     // otherwise answer an older topic from the history or the notes.
-    if (replyTo) parts.push(`[My last message]\n${replyTo.length > 280 ? `${replyTo.slice(0, 280)}…` : replyTo}`);
+    if (replyTo) parts.push(`[What I said last]\n${replyTo.length > 280 ? `${replyTo.slice(0, 280)}…` : replyTo}`);
 
     const rules = [];
-    // Without facts a small model fills the gap with an invented job or project.
-    if (!hasFacts && intent !== 'about_owner') rules.push(`No facts about me came with this message: don't mention my job, company, projects, studies or personal life.`);
+    if (intent === 'creative') {
+      // Fiction must not borrow my real life or theirs, and must not rerun earlier stories.
+      rules.push(`This is creative writing: invent original characters, places and plot — it is not about me or ${them} unless they asked for that. Pick a fresh theme and setting; don't reuse topics from earlier stories in this chat.`);
+    } else if (!hasFacts && intent !== 'about_owner') {
+      // Without facts a small model fills the gap with an invented job or project.
+      rules.push(`No facts about me came with this message: don't mention my job, company, projects, studies or personal life.`);
+    }
+    if (hasFacts && longTerm) rules.push(`"My facts" are about me; the notes and their messages are about ${them} — never mix the two up.`);
     if (refersToPast) {
       rules.push(hadNotes
-        ? `They're referring to an earlier chat: answer from what I remember about them.`
+        ? `They're referring to an earlier chat: answer from the notes about ${them}.`
         : `They're referring to an earlier chat, but I have no notes about it: say so honestly and ask for a one-line reminder.`);
     }
     if (wantsAnswer) rules.push('They want the answer: give it directly and correctly first; if their idea was wrong, correct it kindly.');
-    if (askedQuestionLast) rules.push("My last message already asked a question: don't end this one with a question.");
+    if (askedQuestionLast) rules.push("What I said last already asked a question: don't end this one with a question.");
+    if (wordTarget) rules.push(`They asked for about ${wordTarget} words: write at least that much.`);
     rules.push(replyTo
-      ? 'Continue exactly what my last message offered or asked. Do not switch to another topic.'
+      ? 'Continue exactly what I said last offered or asked. Do not switch to another topic.'
       : 'Answer the message in the flow of our conversation so far. Use the facts/notes only if they directly help; otherwise ignore them and never bring them up.');
 
     const hint = lang.code === 'und' ? '' : `\n\n(Reply in ${lang.name}${lang.reason === 'preference' ? ' — they asked for it' : ''}.)`;
-    const message = replyTo ? `Message (their reply to my last message): ${text}` : `Message: ${text}`;
+    const message = replyTo ? `Their message (a reply to what I said last): ${text}` : `Their message: ${text}`;
     const head = parts.length ? `${parts.join('\n\n')}\n\n---\n` : '';
     return `${head}${message}${hint}\n(${rules.join(' ')})`;
   }
@@ -125,7 +164,9 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     // context, and the notes' old topics pull small models off-topic, so they're skipped
     // unless the chat is fresh or the message refers to the past.
     const refersToPast = REFERS_TO_PAST.test(text);
-    const longTerm = longTermAvailable && (turns.length < 6 || refersToPast) ? longTermAvailable : null;
+    // Creative writing never gets the notes: the contact's life ended up as "my" story.
+    const longTerm = longTermAvailable && intent !== 'creative' && (turns.length < 6 || refersToPast) ? longTermAvailable : null;
+    const wordTarget = requestedWords(text);
     const lastTurn = turns.at(-1);
     const replyTo = isShortReply(text) && lastTurn?.role === 'assistant' ? lastTurn.content : null;
     // Stop the "…? …? …?" loop: every reply ending in a question feels like an interrogation.
@@ -170,9 +211,10 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     // --- Context window: system + notes + reply budget first, history gets the rest ---
     const userTurn = buildUserTurn({
       text, lang, retrieval, intent, contactName, longTerm, owner, replyTo,
-      refersToPast, hadNotes: !!longTermAvailable, askedQuestionLast, wantsAnswer,
+      refersToPast, hadNotes: !!longTermAvailable, askedQuestionLast, wantsAnswer, wordTarget,
     });
-    const maxTokens = clamp(Math.round(settings.maxTokens * profile.tokenScale), 48, 2048);
+    // "minimum 200 words" needs ~1.6 tokens per word; otherwise the reply budget follows the intent.
+    const maxTokens = clamp(Math.max(Math.round(settings.maxTokens * profile.tokenScale), wordTarget ? Math.ceil(wordTarget * 1.6) + 40 : 0), 48, 1400);
     const numCtx = llm.numCtx || 4096;
     const historyBudget = Math.max(0, Math.min(settings.historyTokens ?? 1500, numCtx - estimateTokens(system) - estimateTokens(userTurn) - maxTokens - SAFETY_TOKENS));
     const { history: picked, tokens: historyTokens } = selectHistory(turns, { maxMessages: settings.historyTurns, maxTokens: historyBudget });
@@ -262,8 +304,15 @@ Return ONLY the updated notes.`,
     for await (const ev of llm.chat({ model: settings.model, messages, temperature: 0.2, maxTokens: 220 })) {
       if (ev.type === 'token') out += ev.text;
     }
-    out = out.trim();
-    return out || previous || null;
+    out = out.trim() || previous || '';
+    // The summary model sometimes drops "I prefer Hinglish"; the next session then answers in
+    // English. Keep a stated preference in the notes deterministically.
+    const stated = statedLanguagePreference(turns.filter((t) => t.role === 'user').map((t) => t.content));
+    if (stated) {
+      const label = stated.name.split(' ')[0];
+      if (!new RegExp(`prefers?\\s+${label}`, 'i').test(out)) out = `${out.replace(/\n?.*\bprefers?\s+(hinglish|hindi|english|marathi|gujarati|tamil|telugu|bengali|kannada|malayalam|punjabi|urdu)\b.*/gi, '')}\n- Prefers ${label}`.trim();
+    }
+    return out || null;
   }
 
   return { respond, summarize };

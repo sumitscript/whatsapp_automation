@@ -113,7 +113,7 @@ Owner messages sent from the phone are added to short-term memory as assistant t
 6. **Prompt layout:**
    - The system prompt is the persona (first person, as Sumit). It stays stable so Ollama can reuse its KV-cache prefix.
    - Then the history.
-   - Then a final user turn holding `[Facts about me]` (KB sections, written in first person), `[What I remember about <name>]`, `[Chatting with] <name>`, `---`, the message, and the language hint.
+   - Then a final user turn holding `[My facts — about <owner> …]` (KB sections, written in first person), `[Notes about <name> — the person I'm chatting with …]`, `[I'm chatting with] <name>`, `---`, the message, and the language hint.
 7. **Generation:** Ollama `/api/chat` streams with `keep_alive: -1`, `num_ctx` (`LLM_NUM_CTX`), and `think:false` for qwen3-family models.
 8. **Bubbles:** `MessageChunker` (`brain/format.js`) converts Markdown to WhatsApp formatting and splits at paragraph breaks (`minChars 60`, `maxChars 700`). It never splits inside a code fence and caps output at `maxBubbles 4`.
 9. **Record:** the raw user text and reply are appended to short-term memory (never the KB notes), and `done` meta (intent, language, latency, sources, cached) is saved with the message.

@@ -40,7 +40,7 @@ test('speaks as the owner in first person, with facts and a language hint', asyn
   const req = llm.calls[0];
   assert.equal(req.temperature, 0.3);
   assert.match(req.messages[0].content, /You are eAsha — the virtual version of Asha/);
-  assert.match(req.messages.at(-1).content, /\[Facts about me\]/);
+  assert.match(req.messages.at(-1).content, /\[My facts — about Asha, the one replying \(me\)\. Not about them\]/);
   assert.match(req.messages.at(-1).content, /Reply in English/);
   assert.equal(done.meta.intent, 'about_owner');
   assert.ok(done.meta.sources.length > 0);
@@ -53,8 +53,8 @@ test('long-term memory and the contact name are injected', async () => {
   const brain = createBrain({ kb, llm, memory, cache });
   await run(brain, { chatId: 'm1', text: 'hey whats up', settings, contactName: 'Ravi', longTermMemory: '- Ravi had an interview at Globex' });
   const last = llm.calls[0].messages.at(-1).content;
-  assert.match(last, /\[What I remember about Ravi\]\n\(from our earlier chats[^)]*\)\n- Ravi had an interview at Globex/);
-  assert.match(last, /\[Chatting with\] Ravi/);
+  assert.match(last, /\[Notes about Ravi — the person I'm chatting with\. Their life, not mine\]\n\(from our earlier chats[^)]*\)\n- Ravi had an interview at Globex/);
+  assert.match(last, /\[I'm chatting with\] Ravi/);
 });
 
 test('memory is ignored when memoryEnabled is off', async () => {
@@ -90,7 +90,7 @@ test('chit-chat skips retrieval and uses a playful temperature', async () => {
   const { done } = await run(brain, { chatId: 'c2', text: 'haha you are funny 😂', settings });
   assert.equal(done.meta.intent, 'joke');
   assert.equal(llm.calls[0].temperature, 0.9);
-  assert.doesNotMatch(llm.calls[0].messages.at(-1).content, /Facts about me/);
+  assert.doesNotMatch(llm.calls[0].messages.at(-1).content, /My facts/);
 });
 
 test('history is passed through and long answers split into bubbles', async () => {
@@ -173,7 +173,7 @@ test('"one more" after a joke stays a joke: no knowledge-base facts, history kep
   assert.equal(done.meta.intent, 'joke');
   assert.equal(done.meta.inheritedIntent, true);
   assert.equal(done.meta.sources.length, 0);
-  assert.doesNotMatch(req.messages.at(-1).content, /\[Facts about me\]/);
+  assert.doesNotMatch(req.messages.at(-1).content, /\[My facts/);
   assert.equal(req.messages.at(-2).role, 'assistant'); // the previous joke is in the prompt
   assert.equal(req.messages.at(-3).content, 'Tell me a joke');
 });
@@ -206,8 +206,8 @@ test('"Yes" is anchored to my last message, not an older topic', async () => {
   ]);
   const { done } = await run(brain, { chatId: 'y1', text: 'Yes', settings });
   const last = llm.calls[0].messages.at(-1).content;
-  assert.match(last, /\[My last message\]\nA → B → C chain of classes\. Want an example\?/);
-  assert.match(last, /Message \(their reply to my last message\): Yes/);
+  assert.match(last, /\[What I said last\]\nA → B → C chain of classes\. Want an example\?/);
+  assert.match(last, /Their message \(a reply to what I said last\): Yes/);
   assert.match(last, /Do not switch to another topic/);
   assert.equal(done.meta.intent, 'coding'); // inherited from the inheritance question
 });

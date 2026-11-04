@@ -23,7 +23,7 @@ Name the company, project and dates in every section.
 ```
 
 ## Rules for good answers
-1. **Write in first person.** eSumit speaks as Sumit, and these notes are given to it as "Facts about me", so write "I built NeoAI", not "Sumit built NeoAI". Keep "Sumit"/"Sumit Soni" in the frontmatter `tags`/`aliases` (and in FAQ headings like `## Q: Where do I work? (Where does Sumit work?)`) so questions that use the name still match.
+1. **Write in first person.** eSumit speaks as Sumit, and these notes are given to it as its "My facts" block, so write "I built NeoAI", not "Sumit built NeoAI". Keep "Sumit"/"Sumit Soni" in the frontmatter `tags`/`aliases` (and in FAQ headings like `## Q: Where do I work? (Where does Sumit work?)`) so questions that use the name still match.
 2. **One topic per `##` section**, roughly 40–250 words. Each section is retrieved on its own, so don't write "as above".
 3. **Keyword-rich headings.** Write `## Faahhh Terminal Sound — VS Code Extension`, not `## Extension`.
 4. **Only true facts.** The bot is told to answer strictly from these files.

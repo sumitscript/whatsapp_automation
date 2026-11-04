@@ -7,7 +7,7 @@ import { classifyIntent } from '../src/brain/intent.js';
 import { replyLanguage, statedLanguagePreference } from '../src/brain/lang.js';
 import { MessageChunker } from '../src/brain/format.js';
 import { editDistance } from '../src/rag/text.js';
-import { createBrain, createMemoryStores } from '../src/brain/pipeline.js';
+import { compactTurn, createBrain, createMemoryStores, requestedWords, selectHistory } from '../src/brain/pipeline.js';
 import { KnowledgeBase } from '../src/rag/kb.js';
 import { DEFAULT_SETTINGS } from '../src/core/settings-schema.js';
 
@@ -66,7 +66,7 @@ test('"I told you last time" uses the notes, or admits there are none', async ()
   const turns = Array.from({ length: 8 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `turn ${i}` }));
   const withNotes = await lastPrompt({ text: 'I told you last time', history: turns, longTermMemory: '- Name: Ravi\n- Preparing for backend interviews' });
   assert.match(withNotes, /Preparing for backend interviews/);
-  assert.match(withNotes, /referring to an earlier chat: answer from what I remember/);
+  assert.match(withNotes, /referring to an earlier chat: answer from the notes about them/);
   const without = await lastPrompt({ text: 'I already told you last time', history: turns });
   assert.match(without, /I have no notes about it: say so honestly/);
 });
@@ -83,7 +83,61 @@ test('asking for the answer and question loops are handled', async () => {
 
 test('a contact named like the owner is marked as a different person', async () => {
   const prompt = await lastPrompt({ text: 'hey there friend', contactName: 'Sumit' });
-  assert.match(prompt, /\[Chatting with\] Sumit \(their WhatsApp name — a different person from me/);
+  assert.match(prompt, /\[I'm chatting with\] Sumit \(their WhatsApp name — a different person from me/);
+});
+
+test('stories are fiction: no KB facts, no notes, creative temperature, word target honoured', async () => {
+  const llm = fakeLlm('Once upon a time…');
+  const brain = createBrain({ kb, llm, ...createMemoryStores() });
+  for await (const _ of brain.respond({ settings, text: 'Tell me long story minimum 200 words', longTermMemory: '- Preparing for backend interviews' }));
+  const req = llm.calls[0];
+  const last = req.messages.at(-1).content;
+  assert.equal(req.temperature, 0.95);
+  assert.ok(req.maxTokens >= 360, `maxTokens ${req.maxTokens}`); // 200 words ≈ 320 tokens + margin
+  assert.doesNotMatch(last, /My facts|Notes about|backend interviews/);
+  assert.match(last, /creative writing: invent original characters/);
+  assert.match(last, /about 200 words/);
+  for (const t of ['I want an fictional story', 'Tell me a horror story', 'ek kahani sunao']) assert.equal(classifyIntent(t, { ownerAliases: aliases }), 'creative', t);
+  // …but "your story" is my real life
+  assert.equal(classifyIntent('tell me your story', { ownerAliases: aliases }), 'about_owner');
+  assert.equal(classifyIntent('can you tell me a horror story', { ownerAliases: aliases }), 'creative');
+});
+
+test('labels say whose information each block is', async () => {
+  const prompt = await lastPrompt({ text: 'what projects did you build', contactName: 'Ravi', longTermMemory: '- Name: Ravi\n- Preparing for backend interviews' });
+  assert.match(prompt, /\[My facts — about Sumit, the one replying \(me\)\. Not about Ravi\]/);
+  assert.match(prompt, /\[Notes about Ravi — the person I'm chatting with\. Their life, not mine\]/);
+  assert.match(prompt, /never mix the two up/);
+  assert.doesNotMatch(prompt, /\[Facts about me\]|\[What I remember/);
+});
+
+test('old long replies are shortened in the history; the newest stays whole', () => {
+  const story = 'Once upon a time there was a server. '.repeat(60);
+  const turns = [
+    { role: 'user', content: 'tell me a story' },
+    { role: 'assistant', content: story },
+    { role: 'user', content: 'another' },
+    { role: 'assistant', content: story },
+  ];
+  const { history } = selectHistory(turns, { maxMessages: 10, maxTokens: 5000 });
+  assert.ok(history[1].content.length < 700 && history[1].content.includes('[…]'));
+  assert.equal(history[3].content, story);
+  assert.equal(compactTurn({ role: 'assistant', content: 'short' }), 'short');
+});
+
+test('a stated language preference is always kept in the memory notes', async () => {
+  const llm = fakeLlm('- Name: Ravi\n- Preparing for backend interviews');
+  const brain = createBrain({ kb, llm, ...createMemoryStores() });
+  const notes = await brain.summarize({
+    previous: null,
+    turns: [{ role: 'user', content: "I'm Ravi, preparing for backend interviews, i prefer hinglish" }, { role: 'assistant', content: 'Nice!' }],
+    contactName: 'Sumit',
+    settings,
+  });
+  assert.match(notes, /- Prefers Hinglish$/);
+  assert.match(llm.calls[0].messages[0].content, /Name: …/);
+  assert.equal(requestedWords('write 300 words on rain'), 300);
+  assert.equal(requestedWords('tell me a story'), null);
 });
 
 test('the first bubble goes out at the first full sentence', () => {
