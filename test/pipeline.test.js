@@ -250,3 +250,38 @@ test('trimDangling and isShortReply edge cases', () => {
   for (const t of ['Yes', 'ok sure', 'haan bhai', 'go on']) assert.equal(isShortReply(t), true, t);
   for (const t of ['why?', 'explain the hash map approach please', '']) assert.equal(isShortReply(t), false, t);
 });
+
+test('"one more" after a joke asks for a NEW joke instead of anchoring to the last one', async () => {
+  const llm = fakeLlm('Why did the scarecrow win an award? Outstanding in his field!');
+  const { memory, cache } = createMemoryStores();
+  const brain = createBrain({ kb, llm, memory, cache });
+  await memory.append('j2', [
+    { role: 'user', content: 'Tell me a joke' },
+    { role: 'assistant', content: "Why don't eggs tell jokes? They'd crack each other up!" },
+  ]);
+  await run(brain, { chatId: 'j2', text: 'One more', settings });
+  const last = llm.calls[0].messages.at(-1).content;
+  assert.doesNotMatch(last, /\[What I said last\]/); // that anchor made the model repeat the old joke
+  assert.doesNotMatch(last, /Continue exactly what I said last/);
+  assert.match(last, /give a NEW joke, different from everything I already said/);
+});
+
+test('arithmetic is answered in plain text, not code', async () => {
+  const llm = fakeLlm('2 + 2 = 4');
+  const { memory, cache } = createMemoryStores();
+  const brain = createBrain({ kb, llm, memory, cache });
+  await run(brain, { chatId: 'a1', text: 'What is 2 + 2', settings });
+  assert.match(llm.calls[0].messages.at(-1).content, /not in a code block/);
+});
+
+test('a plain "yes" still continues what I just offered', async () => {
+  const llm = fakeLlm('Great, here it is!');
+  const { memory, cache } = createMemoryStores();
+  const brain = createBrain({ kb, llm, memory, cache });
+  await memory.append('y1', [
+    { role: 'user', content: 'what is your name' },
+    { role: 'assistant', content: 'I am eAsha. Want a quick intro?' },
+  ]);
+  await run(brain, { chatId: 'y1', text: 'yes', settings });
+  assert.match(llm.calls[0].messages.at(-1).content, /\[What I said last\]/);
+});

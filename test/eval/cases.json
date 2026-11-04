@@ -120,6 +120,31 @@
       "turns": [
         { "user": "yes", "usesKb": false, "notMatches": ["iamneo", "neoai", "leetcode"], "maxChars": 600 }
       ]
+    },
+    {
+      "id": "joke-no-repeat",
+      "description": "\"One more\" must give a NEW joke, not repeat the one just told (seen live: the model repeated it).",
+      "seed": [
+        { "role": "user", "content": "Tell me a joke" },
+        { "role": "assistant", "content": "Why don't eggs tell jokes? They'd crack each other up!" }
+      ],
+      "turns": [
+        { "user": "One more", "intent": "joke", "inheritedIntent": true, "usesKb": false, "notMatches": ["eggs", "crack each other up"] }
+      ]
+    },
+    {
+      "id": "math-plain-text",
+      "description": "Arithmetic is answered in plain text, not a code block (seen live: print(4)).",
+      "turns": [
+        { "user": "What is 2 + 2", "intent": "math", "matches": ["\\b4\\b"], "notMatches": ["```", "print\\("] }
+      ]
+    },
+    {
+      "id": "meeting-request-passes-on",
+      "description": "A meeting request is passed on to the real owner: the bot never agrees to it or declines it.",
+      "turns": [
+        { "user": "lets meet tomorrow at 5pm at the office?", "usesKb": false, "matches": ["pass|let .{0,12}know|check with|confirm|get back"], "notMatches": ["see you (there|tomorrow)", "i'?ll be there"] }
+      ]
     }
   ]
 }

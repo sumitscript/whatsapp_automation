@@ -97,7 +97,7 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
   // user. Every label therefore says explicitly whose information it is — with
   // "[Facts about me]" a 4B model credited the owner's projects to the contact and
   // retold the contact's interview prep as its own life.
-  function buildUserTurn({ text, lang, retrieval, intent, contactName, longTerm, owner, replyTo, refersToPast, hadNotes, askedQuestionLast, wantsAnswer, wordTarget }) {
+  function buildUserTurn({ text, lang, retrieval, intent, contactName, longTerm, owner, replyTo, refersToPast, hadNotes, askedQuestionLast, wantsAnswer, wordTarget, wantsAnother }) {
     const parts = [];
     const them = contactName || 'them';
     const hasFacts = !!retrieval?.sections.length;
@@ -133,6 +133,8 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     if (wantsAnswer) rules.push('They want the answer: give it directly and correctly first; if their idea was wrong, correct it kindly.');
     if (askedQuestionLast) rules.push("What I said last already asked a question: don't end this one with a question.");
     if (isMeetingRequest(text)) rules.push(`This asks ${owner} for a meeting, call or favour. Don't agree, refuse or promise anything for me: say I'll pass it on and the real ${owner} will confirm.`);
+    if (wantsAnother) rules.push(`They want another one: give a NEW ${intent === 'joke' ? 'joke' : 'one'}, different from everything I already said in this chat. Never repeat or reword an earlier one.`);
+    if (intent === 'math') rules.push('Give the result in plain text (like "2 + 2 = 4"), not in a code block.');
     if (wordTarget) rules.push(`They asked for about ${wordTarget} words: write at least that much.`);
     rules.push(replyTo
       ? 'Continue exactly what I said last offered or asked. Do not switch to another topic.'
@@ -170,15 +172,18 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     const longTerm = longTermAvailable && intent !== 'creative' && (turns.length < 6 || refersToPast) ? longTermAvailable : null;
     const wordTarget = requestedWords(text);
     const lastTurn = turns.at(-1);
-    const replyTo = isShortReply(text) && lastTurn?.role === 'assistant' ? lastTurn.content : null;
+    // "one more" after a joke/story asks for a NEW one. Anchoring it to my last message made the
+    // model repeat that message, so these follow-ups skip the "what I said last" anchor.
+    const wantsAnother = inherited && (intent === 'joke' || intent === 'creative');
+    const replyTo = !wantsAnother && isShortReply(text) && lastTurn?.role === 'assistant' ? lastTurn.content : null;
     // Stop the "…? …? …?" loop: every reply ending in a question feels like an interrogation.
     const askedQuestionLast = lastTurn?.role === 'assistant' && /\?\s*[\p{Extended_Pictographic}\s]*$/u.test(lastTurn.content);
     const wantsAnswer = WANTS_ANSWER.test(text);
 
     // --- Retrieval (vectorless, ~1ms) ---
     let retrieval = null;
-    // Tiny general messages ("ok", "2+2", "one more") never deserve knowledge-base facts.
-    const tinyGeneral = intent === 'general' && text.trim().split(/\s+/).length <= 3;
+    // Tiny general messages ("ok", "2+2", "one more") and meeting requests never deserve knowledge-base facts.
+    const tinyGeneral = intent === 'general' && (text.trim().split(/\s+/).length <= 3 || isMeetingRequest(text));
     if (profile.useKb && !tinyGeneral) {
       const lastUser = [...turns].reverse().find((t) => t.role === 'user')?.content;
       const query = followUp && lastUser ? `${lastUser} ${text}` : text;
@@ -213,7 +218,7 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     // --- Context window: system + notes + reply budget first, history gets the rest ---
     const userTurn = buildUserTurn({
       text, lang, retrieval, intent, contactName, longTerm, owner, replyTo,
-      refersToPast, hadNotes: !!longTermAvailable, askedQuestionLast, wantsAnswer, wordTarget,
+      refersToPast, hadNotes: !!longTermAvailable, askedQuestionLast, wantsAnswer, wordTarget, wantsAnother,
     });
     // "minimum 200 words" needs ~1.6 tokens per word; otherwise the reply budget follows the intent.
     const maxTokens = clamp(Math.max(Math.round(settings.maxTokens * profile.tokenScale), wordTarget ? Math.ceil(wordTarget * 1.6) + 40 : 0), 48, 1400);
