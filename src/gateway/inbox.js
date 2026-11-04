@@ -12,11 +12,26 @@ import { KeyedQueue, normalizePhone, phoneFromWid, sleep, uid } from '../core/ut
 import { renderTemplate } from '../core/settings-schema.js';
 import { helpText, parseCommand } from '../brain/commands.js';
 import { TOPICS } from '../bus/index.js';
+import { formatWhen } from '../brain/agenda.js';
 
 const TEXT_TYPES = new Set(['chat', 'text']);
 const TYPING_REFRESH_MS = 8_000; // the contact's phone drops "typing…" after ~10–25s, so keep re-sending it
 const TYPING_MAX_MS = 180_000;
 const ERROR_NOTICE_COOLDOWN_MS = 10 * 60_000;
+const UNSUPPORTED_COOLDOWN_MS = 60_000;
+// Message types a person sends on purpose but that we can't read (system notifications are ignored silently).
+const MEDIA_KINDS = {
+  ptt: 'voice notes',
+  audio: 'audio messages',
+  image: 'photos',
+  video: 'videos',
+  sticker: 'stickers',
+  document: 'documents',
+  location: 'locations',
+  vcard: 'contact cards',
+  multi_vcard: 'contact cards',
+  poll_creation: 'polls',
+};
 
 export class Inbox {
   constructor({ wa, repo, redis, bus, settings, memory, sessions, hub, logger }) {
@@ -28,6 +43,7 @@ export class Inbox {
     this.lanes = new KeyedQueue(); // per-chat ordered delivery
     this.echo = new Map(); // `${chatId}|${body}` → count of messages we are sending (to ignore our own echoes)
     this.lastErrorNotice = new Map();
+    this.lastUnsupported = new Map();
 
     // Session side effects live here so command, console and idle-timeout endings behave the same.
     sessions.on('start', ({ chatId }) => this.#emitChat(chatId));
@@ -36,6 +52,7 @@ export class Inbox {
       this.#typingStop(chatId, true);
       await this.bus.publish(TOPICS.inbound, chatId, { type: 'summarize', chatId, reason, jobId: uid() }).catch((err) => this.log.warn('summarize job failed to publish', { err }));
       this.#emitChat(chatId);
+      if (reason === 'timeout') this.#timeoutNotice(chatId).catch((err) => this.log.debug('timeout notice not sent', { chatId, err: err.message }));
     });
   }
 
@@ -43,6 +60,7 @@ export class Inbox {
 
   async handleIncoming(msg) {
     if (msg.isStatus || msg.from === 'status@broadcast' || msg.broadcast) return;
+    if (msg.fromMe) return; // our own alerts to the owner's number, or the owner texting themselves
     const chatId = msg.from;
     const isGroup = chatId.endsWith('@g.us');
     const waContact = await msg.getContact().catch(() => null);
@@ -73,8 +91,9 @@ export class Inbox {
       const myId = this.wa.me?.wid;
       if (!myId || !(msg.mentionedIds || []).some((id) => String(id?._serialized ?? id) === myId)) return skip('group: not mentioned');
     }
-    if (!TEXT_TYPES.has(type) && !body.trim()) return skip(`unsupported type ${type}`);
-    if (!body.trim()) return skip('empty');
+    const unsupported = !TEXT_TYPES.has(type) && !body.trim();
+    if (unsupported && !MEDIA_KINDS[type]) return skip(`unsupported type ${type}`);
+    if (!unsupported && !body.trim()) return skip('empty');
 
     const cmd = parseCommand(body, s);
     // Count only messages we might answer: commands, or anything inside a session.
@@ -94,6 +113,8 @@ export class Inbox {
       await this.sessions.touch(chatId);
     }
     if (!canSpeak) return skip(contact.aiPaused ? 'ai paused for chat' : 'owner takeover active');
+
+    if (unsupported) return this.#unsupportedNotice(contact, type);
 
     if (cmd?.type === 'reset') {
       await this.memory.clear(chatId);
@@ -132,6 +153,65 @@ export class Inbox {
       if (ended && notify) await this.#sendSystem(chatId, renderTemplate(s.goodbyeMessage, s, { name: contact.name }), 'goodbye');
     }
     return this.repo.getChat(chatId);
+  }
+
+  /** Voice note / photo / sticker: say what we can't read instead of staying silent. */
+  async #unsupportedNotice(contact, type) {
+    const chatId = contact.chatId;
+    if (Date.now() - (this.lastUnsupported.get(chatId) || 0) < UNSUPPORTED_COOLDOWN_MS) return;
+    this.lastUnsupported.set(chatId, Date.now());
+    const s = this.settings.get();
+    await this.#sendSystem(chatId, renderTemplate(s.unsupportedMessage, s, { name: contact.name, kind: MEDIA_KINDS[type] }), 'unsupported');
+  }
+
+  /** The session ended because the person went quiet: tell them, with a way back in. */
+  async #timeoutNotice(chatId) {
+    const s = this.settings.get();
+    if (!s.notifyOnTimeout || s.replyMode !== 'session') return;
+    const contact = await this.repo.getContactByChatId(chatId);
+    if (!contact || contact.isGroup || contact.isBlocked || contact.aiPaused) return;
+    if (await this.redis.exists(keys.takeover(chatId))) return; // the owner is talking to them
+    await this.#sendSystem(chatId, renderTemplate(s.timeoutMessage, s, { name: contact.name }), 'timeout');
+  }
+
+  /** Message the owner on their own WhatsApp number (alerts). Returns false when WhatsApp is not connected. */
+  async notifyOwner(text) {
+    const me = this.wa.me?.wid;
+    if (!me || !this.wa.ready) return false;
+    try {
+      await this.#send(me, text);
+      return true;
+    } catch (err) {
+      this.log.warn('Could not message the owner', { err });
+      return false;
+    }
+  }
+
+  /** The owner confirmed or declined an appointment in the console and chose to tell the contact. */
+  async notifyAgendaDecision(item, status) {
+    if (!item.chatId || !['confirmed', 'declined'].includes(status)) return false;
+    const s = this.settings.get();
+    const owner = String(s.ownerName || 'the owner').split(/\s+/)[0];
+    const name = String(item.contactName || '').trim().split(/\s+/)[0] || 'there';
+    const when = item.dueAt ? formatWhen(item.dueAt, s.timezone, item.allDay) : 'the time we discussed';
+    const text =
+      status === 'confirmed'
+        ? `Good news ${name}! ${owner} confirmed: ${item.title} — ${when} ✅`
+        : `Hey ${name}, ${owner} can't make this one (${item.title}, ${when}). Feel free to suggest another time 🙏`;
+    await this.#sendSystem(item.chatId, text, 'agenda');
+    return true;
+  }
+
+  async #onAgenda(ev) {
+    this.hub.emit('agenda:update', { id: ev.itemId, created: !!ev.created });
+    const s = this.settings.get();
+    if (!ev.created || !s.notifyOwnerOnAgenda) return;
+    const item = await this.repo.getAgendaItem(ev.itemId);
+    if (!item) return;
+    const who = item.contactName || item.phone || 'a contact';
+    const when = item.dueAt ? ` — ${formatWhen(item.dueAt, s.timezone, item.allDay)}` : '';
+    const head = item.kind === 'appointment' ? '📅 Meeting request' : '📝 New to-do';
+    await this.notifyOwner(`${head} from ${who}: ${item.title}${when}\nReview it in the console → Agenda.`);
   }
 
   #enqueue(contact, body, messageId, isGroup) {
@@ -177,6 +257,7 @@ export class Inbox {
   handleOutbound(ev) {
     if (!ev?.chatId) return;
     if (ev.type === 'memory') return this.#emitChat(ev.chatId);
+    if (ev.type === 'agenda') return this.#onAgenda(ev).catch((err) => this.log.warn('agenda event failed', { err }));
     return this.lanes.push(ev.chatId, () => this.#deliver(ev)).catch((err) => this.log.error('Delivery failed', { chatId: ev.chatId, err }));
   }
 

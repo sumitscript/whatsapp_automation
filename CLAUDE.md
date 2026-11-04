@@ -26,9 +26,10 @@ npm run lint                      # scripts/check-syntax.js → node --check on 
 npm run kb:search -- "question"   # inspect retrieval scores against knowledge_base/
 npm run dev:gateway / dev:worker  # node --watch with --env-file-if-exists=.env (needs Postgres, Redis, Ollama)
 npm run bench -- gemma3:4b        # TTFT / tok/s per model against a live Ollama
+npm run eval -- --model gemma3:4b,llama3.2:3b   # replay test/eval/cases.json through the real pipeline against a LIVE Ollama (needs the models installed; exit 1 on any failed check; --only <id>, --json out.json, --temperature N)
 ```
 
-Tests, lint and `kb:search` run **without `node_modules`**. The modules they touch (`src/rag`, `src/brain`, `src/auth/{jwt,password}`, `src/core/{util,settings-schema,config,logger}`) must stay free of npm dependencies. Anything importing `pg`, `ioredis`, `kafkajs`, `express`, `socket.io` or `whatsapp-web.js` belongs elsewhere.
+Tests, lint and `kb:search` run **without `node_modules`**. The modules they touch (`src/rag`, `src/brain`, `src/auth/{jwt,password}`, `src/core/{util,settings-schema,config,logger}`, `src/llm/status.js`, `scripts/eval-lib.js`) must stay free of npm dependencies. Anything importing `pg`, `ioredis`, `kafkajs`, `express`, `socket.io` or `whatsapp-web.js` belongs elsewhere.
 
 ## Architecture
 
@@ -78,6 +79,9 @@ Tests, lint and `kb:search` run **without `node_modules`**. The modules they tou
 - **Settings:** stored in Postgres (`settings` key/value jsonb), validated by `core/settings-schema.js`. Every process caches them and reloads on the Redis `ch:settings` pub/sub. A new setting must be added to `DEFAULT_SETTINGS` **and** `RULES` there, or it is rejected.
 - **KB edits:** made through the API, which writes the file, reloads it and publishes `ch:kb`. Both processes also `fs.watch` the directory.
 - **LLM status:** the worker writes a heartbeat to Redis `worker:status` (every 5 s, 20 s TTL). `GET /api/llm/status` merges it with live Ollama `/api/version`, `/api/tags` and `/api/ps` for the dashboard card.
+- **Agenda:** the worker spots commitments ("let's meet tomorrow at 5", "remind me to…") and stores them in `agenda_items`. `brain/agenda.js` (pure) gates messages with `looksLikeCommitment`, and `brain.extractAgenda` asks the LLM for kind/title/details as JSON. **Dates are read by `parseWhen` with Intl in `settings.timezone`, never by the model** (a 3B model is unreliable at date math). Extraction runs on the worker's idle queue, ahead of memory folds, and never delays a live reply. If the model fails, `heuristicItem` still records a plain "let's meet tomorrow at 5pm". `sameItem` merges refinements ("make it 6pm") into the existing item. The worker publishes `{type:'agenda'}` on `wa.outbound`; inbox emits `agenda:update` and WhatsApps the owner (`notifyOwner`). The reply prompt also gets a rule not to agree to meetings for the owner. Console: `/api/agenda` + `public/js/views/agenda.js`; confirming/declining can message the contact (`notify: true`).
+- **Owner alerts:** `gateway/llm-monitor.js` probes the LLM every 30 s (`probeLlmStatus` → pure `deriveLlmState`), emits `llm:status`, and after 90 s of "down" (not in the first 5 min after boot) messages the owner's own number once, then once on recovery (`DownAlerter`). `inbox.notifyOwner` sends to `wa.me.wid`; inbound `fromMe` messages are ignored so these never become chat input.
+- **Notices to contacts:** session timeout (`timeoutMessage`, from the `end` listener with reason `timeout`) and unreadable media — voice notes, photos, stickers (`unsupportedMessage`, 60 s cooldown per chat, only types in `MEDIA_KINDS`). Both are templates rendered by `renderTemplate` ({name} {persona} {owner} {start} {stop} {kind}).
 - **Logs:** go to stdout **and** to a capped Redis list + pub/sub (`core/redis.js` `attachRedisLogSink`). `gateway/realtime.js` relays them to Socket.IO room `logs`. Never log inside that relay handler: it would loop.
 - **Own-message echoes:** inbox tracks bodies it is sending (`echo` map). `message_create` events from the phone that aren't ours count as owner takeover (Redis `takeover:<chatId>`, TTL = `takeoverSeconds`, default 30) and are added to memory as assistant turns.
 
@@ -90,7 +94,7 @@ Tests, lint and `kb:search` run **without `node_modules`**. The modules they tou
 **Schema:** `db/migrations/*.sql`, applied in order by `db/pg.js` under an advisory lock (gateway and worker can both boot it). Add new files; never edit applied ones. Rows are mapped to camelCase in `db/repo.js`.
 
 **Deploy:**
-- One image with two commands (`docker-compose.yml`). Kafka sits behind compose profile `kafka`; `BUS_DRIVER=redis` drops it.
+- One image with two commands (`docker-compose.yml`). The bus defaults to Redis Streams; Kafka is opt-in (`BUS_DRIVER=kafka` + compose profile `kafka`, ~1 GB RAM).
 - CI (`.github/workflows/ci.yml`) runs a boot smoke test with `BUS_DRIVER=redis` and `WA_AUTO_CONNECT=false`.
 - `deploy.yml` builds to GHCR and runs `deploy/deploy.sh` over SSH, which health-checks and rolls back.
 - The server's `knowledge_base/` is a bind mount seeded once from the image; it is the live source of truth.

@@ -64,7 +64,7 @@ export const config = Object.freeze({
   }),
 
   bus: Object.freeze({
-    driver: str(env.BUS_DRIVER, 'kafka'), // kafka | redis
+    driver: str(env.BUS_DRIVER, 'redis'), // redis (default, lighter) | kafka
     kafkaBrokers: list(env.KAFKA_BROKERS, ['localhost:9092']),
     kafkaClientId: str(env.KAFKA_CLIENT_ID, 'wa-assistant'),
     partitions: int(env.KAFKA_PARTITIONS, 3),

@@ -74,7 +74,8 @@ eSumit is Sumit's AI twin on WhatsApp. It is a self-hosted system with two Node 
   - cancel the pending debounce;
   - stop typing;
   - publish a `{type:'summarize'}` job;
-  - emit `chat:update`.
+  - emit `chat:update`;
+  - when the reason is `timeout`, send the `timeoutMessage` template (skipped if the contact is blocked, paused or in an owner takeover).
 - **From the console** you can start or end a session with optional `notify`, which sends the welcome or goodbye template.
 
 ## Memory (two levels)
@@ -118,6 +119,22 @@ Owner messages sent from the phone are added to short-term memory as assistant t
 8. **Bubbles:** `MessageChunker` (`brain/format.js`) converts Markdown to WhatsApp formatting and splits at paragraph breaks (`minChars 60`, `maxChars 700`). It never splits inside a code fence and caps output at `maxBubbles 4`.
 9. **Record:** the raw user text and reply are appended to short-term memory (never the KB notes), and `done` meta (intent, language, latency, sources, cached) is saved with the message.
 
+## Agenda (appointments and to-dos)
+
+People often ask the owner for things in a chat ("let's meet tomorrow at 5", "remind me to send the file by Friday"). The worker collects these so nothing is lost:
+
+1. After a reply, `looksLikeCommitment` (regex) decides whether the message is worth a look. This keeps the LLM off ordinary chat.
+2. On the worker's idle queue (before memory folds, never during a live reply) `brain.extractAgenda` asks the model for `{kind, title, details, when, location}` as JSON.
+3. **Dates are read in code**, not by the model: `parseWhen` understands "tomorrow at 5pm", "kal shaam 6 baje", "next friday", "12/11 3pm" in `settings.timezone`. A time-only reply ("yes 5pm works") borrows the day from earlier turns. If the model is down, a heuristic still records clear meeting requests.
+4. The item is stored in `agenda_items` (status `pending` = needs your decision). A refinement of an earlier proposal updates the same item.
+5. The worker publishes `{type:'agenda'}`; the gateway pushes `agenda:update` to the console and, if enabled, WhatsApps the owner on their own number.
+
+The reply prompt also tells the model not to agree to a meeting for the owner: it says it will pass the request on. In the console's Agenda page you confirm or decline (optionally telling the contact), mark things done, or add items by hand.
+
+## Owner alerts
+
+`gateway/llm-monitor.js` checks the LLM every 30 s (Ollama reachable, model installed and resident, worker heartbeat fresh). State changes go to the console as `llm:status`. If it stays down for 90 s (ignored for the first 5 min after the gateway boots) the owner gets one WhatsApp message on their own number, and one more when it recovers.
+
 ## Vectorless RAG (`src/rag/`)
 
 - **Corpus:** `knowledge_base/*.md`. Files starting with `_` and `README.md` are ignored.
@@ -145,6 +162,7 @@ Migrations live in `db/migrations/`. `db/pg.js` applies them in order under an a
 | `contacts` | One row per chat: `chat_id` (unique), `phone` (unique), `name`, `is_group`, `is_blocked`, `ai_paused`, `notes`, `memory`, `memory_updated_at`, `last_message_at` |
 | `messages` | Permanent log: `wa_message_id` (unique), `chat_id`, `direction` (`in`/`out`), `body`, `type`, `is_ai`, `sent_by`, `model`, `intent`, `language`, `latency_ms`, `cached`, `sources` (jsonb), `created_at` |
 | `sessions` | AI sessions: `chat_id`, `started_at`, `last_activity_at`, `ended_at`, `ended_reason` (`command`/`timeout`/`console`), `message_count`. Unique open session per chat |
+| `agenda_items` | Appointments and to-dos: `chat_id` (null for manual), `kind` (`appointment`/`todo`), `title`, `details`, `due_at`, `all_day`, `due_text`, `location`, `status` (`pending`/`confirmed`/`declined`/`done`), `source` (`ai`/`manual`), `source_message` |
 | `settings` | Key/value `jsonb`, validated by `core/settings-schema.js` |
 | `audit_log` | Console actions: `username`, `action`, `details` |
 

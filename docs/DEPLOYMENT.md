@@ -55,8 +55,10 @@ cd /opt/whatsapp-ai && nano .env
 
 | Setup | `.env` |
 |---|---|
-| Kafka (default) | `COMPOSE_PROFILES=kafka` and `BUS_DRIVER=kafka` |
-| Redis Streams (saves ~1 GB RAM) | remove `COMPOSE_PROFILES` and set `BUS_DRIVER=redis` |
+| Redis Streams (default, saves ~1 GB RAM) | `BUS_DRIVER=redis`, no `COMPOSE_PROFILES` |
+| Kafka | `COMPOSE_PROFILES=kafka` and `BUS_DRIVER=kafka` |
+
+Moving an existing server from Kafka to Redis: edit `.env` on the server (`BUS_DRIVER=redis`, delete the `COMPOSE_PROFILES=kafka` line), then `docker compose up -d --remove-orphans`. Jobs in flight at that moment are dropped, which is harmless for a chat bot.
 
 **Testing over plain HTTP** (`DOMAIN=:80`): also set `COOKIE_SECURE=false` and `PUBLIC_ORIGIN=http://<server IP>`. Otherwise the browser drops the login cookie.
 
@@ -215,5 +217,17 @@ Use your `POSTGRES_USER` / `POSTGRES_DB` values if you changed them. The WhatsAp
 | **401 right after login** | The cookie was rejected: on plain HTTP set `COOKIE_SECURE=false`. A changed `JWT_SECRET` or password also signs everyone out (expected) |
 | **403 "Cross-origin request blocked"** | `PUBLIC_ORIGIN` doesn't exactly match the URL in your browser (scheme, host, port) |
 | **Caddy TLS errors** | DNS doesn't point at the server yet, or ports 80/443 are blocked by a cloud firewall. Check `docker compose logs caddy` |
-| **Worker errors about Kafka** | `BUS_DRIVER=kafka` but `COMPOSE_PROFILES` doesn't include `kafka`, or the other way round |
+| **Worker errors about Kafka** | `BUS_DRIVER=kafka` but `COMPOSE_PROFILES` doesn't include `kafka`, or the other way round. The default is Redis (`BUS_DRIVER=redis`, no profile) |
 | **Deploy rolled back** | The script prints the last 80 lines of gateway and worker logs. Usually a missing `.env` value (`JWT_SECRET`, `POSTGRES_PASSWORD`) |
+
+## Evaluating conversation quality
+
+`npm run eval` replays the multi-turn conversations in `test/eval/cases.json` (real failures seen in production) against a **live** Ollama model through the real reply pipeline, then checks the answers (intent, KB use, script, forbidden phrases, length). The unit tests use a fake LLM, so this is the only check of actual model behaviour. It never pulls models and writes nothing except an optional `--json` file.
+
+The image includes `scripts/`, `knowledge_base/` and `test/eval/`, so on the server run:
+
+```bash
+docker compose exec worker node scripts/eval.js --model gemma3:4b,llama3.2:3b
+```
+
+Run it from a checkout (with `npm run eval -- --model gemma3:4b`, `OLLAMA_URL` pointing at the server's Ollama) if you prefer. Options: `--only <id-substring>`, `--json out.json`, `--temperature N`. Models must already be installed. The exit code is 1 if any check fails. Run it before switching `LLM_MODEL` or after editing the persona, and note it competes for CPU with live traffic, so prefer a quiet moment.

@@ -1,0 +1,125 @@
+{
+  "_readme": "Cases for `npm run eval` (scripts/eval.js). Add a case: append an object to `cases` with a unique `id`, a one-line `description`, optional `contactName` (WhatsApp name of the contact), optional `longTermMemory` (notes text) and optional `seed` (earlier turns [{role:'user'|'assistant', content}] placed in memory before turn 1), and `turns`: [{ user, ...checks }]. Turns run in order in ONE chat, so later turns see earlier replies. Checks (all optional, all tolerant): intent (exact), inheritedIntent (bool), usesKb (bool: were knowledge-base sections used), matches (regex strings that must ALL match the whole reply), notMatches (regex strings that must NOT match), maxChars, maxBubbles, scriptOf (latin|devanagari|arabic|bengali|gurmukhi|gujarati|tamil|telugu|kannada|malayalam|cyrillic|han: dominant script of the reply). Regexes are case-insensitive, unicode, matched against the bubbles joined by blank lines. Prefer robust negative checks (notMatches) over brittle positive ones: the reply is free text from a small model. A case should encode a REAL failure seen in production. Validate with `npm test` (test/eval-lib.test.js compiles every regex).",
+  "cases": [
+    {
+      "id": "joke-one-more",
+      "description": "'One more' after a joke must stay a joke, not pull in the CV.",
+      "turns": [
+        { "user": "Tell me a joke", "intent": "joke", "usesKb": false, "notMatches": ["iamneo", "leetcode", "neoai"] },
+        { "user": "One more", "intent": "joke", "inheritedIntent": true, "usesKb": false, "notMatches": ["iamneo", "leetcode", "neoai", "my projects?\\b"] }
+      ]
+    },
+    {
+      "id": "joke-another-one",
+      "description": "'Another one' after a joke inherits the joke topic.",
+      "turns": [
+        { "user": "tell me a programming joke", "intent": "joke", "usesKb": false },
+        { "user": "Another one", "intent": "joke", "inheritedIntent": true, "usesKb": false, "notMatches": ["iamneo", "leetcode", "neoai"] }
+      ]
+    },
+    {
+      "id": "math-2-plus-2",
+      "description": "Plain arithmetic: correct answer, no CV facts or LeetCode.",
+      "turns": [
+        { "user": "What is 2 + 2", "intent": "math", "usesKb": false, "matches": ["\\b4\\b|four"], "notMatches": ["leetcode", "two sum", "iamneo", "my projects?\\b"], "maxChars": 400 }
+      ]
+    },
+    {
+      "id": "identity-name",
+      "description": "Asked for its name it says eSumit, short.",
+      "turns": [
+        { "user": "What is your name ?", "matches": ["esumit"], "maxChars": 500 }
+      ]
+    },
+    {
+      "id": "smalltalk-how-are-you",
+      "description": "'How are you?' is small talk, not a CV dump.",
+      "turns": [
+        { "user": "How are you?", "intent": "greeting", "usesKb": false, "notMatches": ["iamneo", "leetcode", "neoai", "b\\.?tech|cgpa"], "maxChars": 400, "maxBubbles": 2 }
+      ]
+    },
+    {
+      "id": "where-are-you",
+      "description": "Must not claim a physical location or presence; must not invent facts.",
+      "turns": [
+        { "user": "Where are you", "notMatches": ["i'?m (currently )?(at|in) (the|my) (office|home|college|gym|cafe|mall)", "i am (currently )?(at|in) (the|my) (office|home|college)"] }
+      ]
+    },
+    {
+      "id": "office-tomorrow",
+      "description": "Must not commit on the owner's behalf; offer to pass the question to the real Sumit.",
+      "turns": [
+        { "user": "Are you coming to the office tomorrow", "notMatches": ["\\byes,? i('| wi)ll (be|come)", "\\bsure,? i('| wi)ll (be|come)", "see you (there|tomorrow)", "i('| wi)ll be there"], "matches": ["sumit|real|pass|let (him|you) know|can'?t (say|confirm)|not sure|don'?t know"] }
+      ]
+    },
+    {
+      "id": "compliment-no-cv",
+      "description": "A compliment about the bot must not trigger an unprompted career narration.",
+      "contactName": "AB",
+      "turns": [
+        { "user": "Nice work Sumit the chatbot works great", "notMatches": ["iamneo", "neoai"], "maxChars": 500 }
+      ]
+    },
+    {
+      "id": "idea-of-love",
+      "description": "Abstract question: answer in general, no CV.",
+      "turns": [
+        { "user": "What is the idea of love", "usesKb": false, "notMatches": ["iamneo", "neoai", "leetcode", "my projects?\\b"], "scriptOf": "latin" }
+      ]
+    },
+    {
+      "id": "long-distance-ideas",
+      "description": "Advice request: must not invent that the contact is a cousin or a family gathering.",
+      "contactName": "Riya",
+      "turns": [
+        { "user": "Give me some ideas for long distance relationship", "usesKb": false, "notMatches": ["cousin", "family gathering", "iamneo", "leetcode"] }
+      ]
+    },
+    {
+      "id": "oops-concept",
+      "description": "General coding explanation, mentions objects.",
+      "turns": [
+        { "user": "What is oops concept", "matches": ["object"], "notMatches": ["iamneo", "neoai"] }
+      ]
+    },
+    {
+      "id": "hinglish-scene",
+      "description": "Hinglish small talk is answered in Latin script, not Devanagari.",
+      "turns": [
+        { "user": "bhai kya scene hai aaj", "scriptOf": "latin", "usesKb": false, "notMatches": ["iamneo", "leetcode"], "maxChars": 500 }
+      ]
+    },
+    {
+      "id": "devanagari-reply",
+      "description": "A Devanagari message is answered in Devanagari.",
+      "turns": [
+        { "user": "आप कैसे हैं?", "scriptOf": "devanagari", "usesKb": false }
+      ]
+    },
+    {
+      "id": "where-work",
+      "description": "Profile question uses the knowledge base.",
+      "turns": [
+        { "user": "where does Sumit work?", "intent": "about_owner", "usesKb": true }
+      ]
+    },
+    {
+      "id": "creative-story",
+      "description": "A made-up story is not about the owner and ignores the KB.",
+      "turns": [
+        { "user": "tell me a short story", "intent": "creative", "usesKb": false, "notMatches": ["iamneo", "neoai", "leetcode", "sumit soni"] }
+      ]
+    },
+    {
+      "id": "yes-after-offer",
+      "description": "'yes' continues what the assistant just offered instead of changing topic.",
+      "seed": [
+        { "role": "user", "content": "hi" },
+        { "role": "assistant", "content": "Hey! 👋 Want me to tell you a quick joke?" }
+      ],
+      "turns": [
+        { "user": "yes", "usesKb": false, "notMatches": ["iamneo", "neoai", "leetcode"], "maxChars": 600 }
+      ]
+    }
+  ]
+}

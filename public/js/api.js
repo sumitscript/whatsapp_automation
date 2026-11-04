@@ -100,6 +100,12 @@ export const api = {
   kbSave: (name, content) => request('PUT', `/api/kb/${enc(name)}`, { content }),
   kbSearch: (query) => request('POST', '/api/kb/search', { query }),
 
+  // agenda
+  agenda: (params) => request('GET', `/api/agenda${qs(params)}`),
+  agendaCreate: (body) => request('POST', '/api/agenda', body),
+  agendaUpdate: (id, patch) => request('PATCH', `/api/agenda/${enc(id)}`, patch),
+  agendaDelete: (id) => request('DELETE', `/api/agenda/${enc(id)}`),
+
   // ops
   logs: (limit = 500, level) => request('GET', `/api/logs${qs({ limit, level })}`),
   stats: () => request('GET', '/api/stats'),

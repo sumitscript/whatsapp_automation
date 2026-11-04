@@ -60,9 +60,24 @@ export async function mount(root, { hub }) {
             <label class="field"><span>Goodbye message</span>
               <textarea name="goodbyeMessage" rows="3" placeholder="Bye {name}! Send {start} any time to chat with {persona} again."></textarea>
             </label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="notifyOnTimeout" /><span>Tell people when their session times out<small class="muted"> — sent once, with how to start again</small></span></label>
+            <label class="field"><span>Timeout message</span>
+              <textarea name="timeoutMessage" rows="3" placeholder="Hey {name}, it's been quiet… send {start} to chat again."></textarea>
+            </label>
+            <label class="field"><span>Reply to voice notes, photos &amp; stickers</span>
+              <textarea name="unsupportedMessage" rows="3" placeholder="Hey {name}! I can only read text, so I can't open {kind}…"></textarea>
+            </label>
             <p class="muted small placeholder-help">Placeholders: <code class="wa-inline">{name}</code> contact name ·
               <code class="wa-inline">{persona}</code> persona name · <code class="wa-inline">{owner}</code> owner name ·
-              <code class="wa-inline">{start}</code> first start command · <code class="wa-inline">{stop}</code> first stop command</p>
+              <code class="wa-inline">{start}</code> first start command · <code class="wa-inline">{stop}</code> first stop command ·
+              <code class="wa-inline">{kind}</code> what they sent (voice notes, photos…, only in the media reply)</p>
+
+            <h3 class="section-title">Agenda &amp; alerts</h3>
+            <label class="switch-row"><input type="checkbox" class="switch" name="agendaEnabled" /><span>Collect appointments &amp; to-dos from chats<small class="muted"> — "let's meet tomorrow at 5" shows up in the Agenda</small></span></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="notifyOwnerOnAgenda" /><span>WhatsApp me about new agenda items<small class="muted"> — sent to your own number</small></span></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="alertOwner" /><span>WhatsApp me if the AI goes down<small class="muted"> — and when it recovers</small></span></label>
+            <label class="field"><span>Timezone for "tomorrow at 5pm"</span><input name="timezone" placeholder="Asia/Kolkata" />
+              <small class="muted">IANA name, e.g. Asia/Kolkata, Europe/London, America/New_York</small></label>
 
             <h3 class="section-title">Memory &amp; context</h3>
             <div class="form-grid">
@@ -135,6 +150,7 @@ export async function mount(root, { hub }) {
       'replyMode', 'ownerName', 'persona', 'temperature', 'maxTokens', 'historyTurns', 'historyTokens', 'debounceMs',
       'humanize', 'answerCache', 'replyInGroups', 'memoryEnabled', 'personaName', 'startCommands', 'stopCommands',
       'welcomeMessage', 'goodbyeMessage', 'sessionIdleMinutes', 'takeoverSeconds',
+      'notifyOnTimeout', 'timeoutMessage', 'unsupportedMessage', 'agendaEnabled', 'notifyOwnerOnAgenda', 'alertOwner', 'timezone',
     ].forEach((k) => set(k, st[k]));
     $('#temp-out', root).textContent = Number(form.temperature.value).toFixed(2);
   }
@@ -166,6 +182,13 @@ export async function mount(root, { hub }) {
       stopCommands: form.stopCommands.value.trim(),
       welcomeMessage: form.welcomeMessage.value,
       goodbyeMessage: form.goodbyeMessage.value,
+      notifyOnTimeout: form.notifyOnTimeout.checked,
+      timeoutMessage: form.timeoutMessage.value,
+      unsupportedMessage: form.unsupportedMessage.value,
+      agendaEnabled: form.agendaEnabled.checked,
+      notifyOwnerOnAgenda: form.notifyOwnerOnAgenda.checked,
+      alertOwner: form.alertOwner.checked,
+      timezone: form.timezone.value.trim(),
     };
     try {
       const { settings } = await api.saveSettings(partial);

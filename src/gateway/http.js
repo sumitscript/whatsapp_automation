@@ -5,6 +5,8 @@ import express from 'express';
 import { config } from '../core/config.js';
 import { channels, keys, recentLogs, withinRate } from '../core/redis.js';
 import { catalogWithInstalled } from '../llm/catalog.js';
+import { deriveLlmState } from '../llm/status.js';
+import { localParts, sanitizeAgendaInput, summarizeAgenda, zonedToUtc } from '../brain/agenda.js';
 
 const CHAT_ID = /^[\w.\-:@]{3,120}$/;
 const KB_FILE = /^[\w\-]{1,80}\.(md|txt)$/;
@@ -62,6 +64,7 @@ export function createApp(deps) {
     next();
   };
   const audit = (req, action, details) => repo.audit(req.user?.username, action, details).catch(() => {});
+  const probeLlm = () => probeLlmStatus({ llm, redis, settings });
 
   app.post('/api/auth/login', async (req, res) => {
     const { username, password } = req.body || {};
@@ -207,41 +210,7 @@ export function createApp(deps) {
     res.json({ current: settings.get().model, installed, catalog: catalogWithInstalled(installed) });
   });
   // Live LLM health: Ollama itself (reachable? model installed/resident?) + the worker's heartbeat.
-  api.get('/llm/status', async (_req, res) => {
-    const model = settings.get().model;
-    const [version, installed, loaded, workerRaw] = await Promise.all([
-      llm.health().catch((err) => ({ error: err.message })),
-      llm.listModels().catch(() => null),
-      llm.loaded().catch(() => null),
-      redis.get(keys.workerStatus).catch(() => null),
-    ]);
-    const worker = workerRaw ? JSON.parse(workerRaw) : null;
-    const workerAlive = !!worker && Date.now() - worker.at < 15_000;
-    const ollamaUp = !version.error;
-    const want = model.includes(':') ? model : `${model}:latest`;
-    const resident = (loaded || []).find((m) => m.name === model || m.name === want) || null;
-    const installedOk = installed ? installed.some((m) => m.name === model || m.name === want) : null;
-
-    let state = 'ok';
-    let message = 'Ready to answer';
-    if (!ollamaUp) [state, message] = ['down', `Ollama is unreachable: ${version.error}`];
-    else if (installedOk === false) [state, message] = ['down', `Model ${model} is not installed — pull it from Settings`];
-    else if (!workerAlive) [state, message] = ['down', 'AI worker is not running (no heartbeat)'];
-    else if (worker.model?.error) [state, message] = ['down', `Model preparation failed: ${worker.model.error}`];
-    else if (!worker.model?.ready) [state, message] = ['degraded', 'Model is loading…'];
-    else if (!resident) [state, message] = ['degraded', 'Model is not resident in RAM yet — the next reply will be slow'];
-
-    res.json({
-      state,
-      message,
-      model,
-      ollama: { up: ollamaUp, version: version.version ?? null, url: config.ollama.url, error: version.error ?? null },
-      installed: installedOk,
-      resident: resident ? { sizeBytes: resident.size ?? null, sizeVramBytes: resident.size_vram ?? null, expiresAt: resident.expires_at ?? null } : null,
-      worker: workerAlive ? worker : null,
-      checkedAt: Date.now(),
-    });
-  });
+  api.get('/llm/status', async (_req, res) => res.json(await probeLlm()));
   const pulling = new Set();
   api.post('/models/pull', async (req, res) => {
     const name = String(req.body?.name || '');
@@ -264,6 +233,63 @@ export function createApp(deps) {
         hub.emit('model:pull', { name, status: 'error', error: err.message });
       })
       .finally(() => pulling.delete(name));
+    res.json({ ok: true });
+  });
+
+  // ---------- agenda (appointments + to-dos from chats) ----------
+  const agendaTz = () => settings.get().timezone || 'Asia/Kolkata';
+  // An all-day item is stored as 09:00 on its date in the owner's timezone (the browser sends local midnight).
+  const normalizeAllDay = (value) => {
+    if (value.allDay === true && value.dueAt) {
+      const p = localParts(new Date(value.dueAt), agendaTz());
+      value.dueAt = zonedToUtc(p.y, p.m, p.d, 9, 0, agendaTz()).toISOString();
+    }
+    return value;
+  };
+  const agendaSummary = async () => summarizeAgenda(await repo.listAgenda({ view: 'all', limit: 1000 }), { timeZone: agendaTz() });
+  const agendaId = (req) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) throw httpError(400, 'Invalid id');
+    return id;
+  };
+  api.get('/agenda', async (req, res) => {
+    const view = ['review', 'open', 'done', 'all'].includes(req.query.status) ? req.query.status : 'all';
+    const kind = ['appointment', 'todo'].includes(req.query.kind) ? req.query.kind : undefined;
+    const [items, summary] = await Promise.all([repo.listAgenda({ view, kind, limit: Number(req.query.limit) || 300 }), agendaSummary()]);
+    res.json({ items, summary, timezone: agendaTz() });
+  });
+  api.post('/agenda', async (req, res) => {
+    const { value, errors } = sanitizeAgendaInput(req.body);
+    if (errors.length) throw httpError(400, errors.join('; '));
+    if (value.chatId && !(await repo.getContactByChatId(value.chatId))) throw httpError(404, 'Chat not found');
+    const item = await repo.createAgendaItem({ ...normalizeAllDay(value), status: value.status || (value.kind === 'appointment' ? 'confirmed' : 'pending'), source: 'manual' });
+    audit(req, 'agenda.create', { id: item.id });
+    hub.emit('agenda:update', { id: item.id, created: true });
+    res.json({ item });
+  });
+  api.patch('/agenda/:id', async (req, res) => {
+    const id = agendaId(req);
+    const { value, errors } = sanitizeAgendaInput(req.body, { partial: true });
+    if (errors.length) throw httpError(400, errors.join('; '));
+    const before = await repo.getAgendaItem(id);
+    if (!before) throw httpError(404, 'Agenda item not found');
+    const item = await repo.updateAgendaItem(id, normalizeAllDay(value));
+    let notified = false;
+    if (req.body?.notify === true && value.status && value.status !== before.status) {
+      notified = await inbox.notifyAgendaDecision(item, value.status).catch((err) => {
+        log.warn('Could not tell the contact about the agenda decision', { id, err });
+        return false;
+      });
+    }
+    audit(req, 'agenda.update', { id, keys: Object.keys(value), notified });
+    hub.emit('agenda:update', { id });
+    res.json({ item, notified });
+  });
+  api.delete('/agenda/:id', async (req, res) => {
+    const id = agendaId(req);
+    if (!(await repo.deleteAgendaItem(id))) throw httpError(404, 'Agenda item not found');
+    audit(req, 'agenda.delete', { id });
+    hub.emit('agenda:update', { id });
     res.json({ ok: true });
   });
 
@@ -339,8 +365,8 @@ export function createApp(deps) {
     res.json({ logs });
   });
   api.get('/stats', async (_req, res) => {
-    const [db, cacheHits] = await Promise.all([repo.stats(), redis.get(keys.cacheHits(new Date().toISOString().slice(0, 10)))]);
-    res.json({ ...db, waState: wa.state, model: settings.get().model, cacheHits: Number(cacheHits) || 0, kbSections: kb.stats().sectionCount });
+    const [db, cacheHits, agenda] = await Promise.all([repo.stats(), redis.get(keys.cacheHits(new Date().toISOString().slice(0, 10))), agendaSummary().catch(() => null)]);
+    res.json({ ...db, waState: wa.state, model: settings.get().model, cacheHits: Number(cacheHits) || 0, kbSections: kb.stats().sectionCount, agenda });
   });
 
   app.use('/api', api);
@@ -368,6 +394,34 @@ export function createApp(deps) {
   });
 
   return app;
+}
+
+/** Probe Ollama + the worker heartbeat and derive one verdict (shared with the alert monitor). */
+export async function probeLlmStatus({ llm, redis, settings }) {
+  const model = settings.get().model;
+  const [version, installed, loaded, workerRaw] = await Promise.all([
+    llm.health().catch((err) => ({ error: err.message })),
+    llm.listModels().catch(() => null),
+    llm.loaded().catch(() => null),
+    redis.get(keys.workerStatus).catch(() => null),
+  ]);
+  let worker = null;
+  try {
+    worker = workerRaw ? JSON.parse(workerRaw) : null;
+  } catch {
+    /* ignore a corrupt heartbeat */
+  }
+  const d = deriveLlmState({ model, version, installed, loaded, worker });
+  return {
+    state: d.state,
+    message: d.message,
+    model,
+    ollama: { up: d.ollamaUp, version: version.version ?? null, url: config.ollama.url, error: version.error ?? null },
+    installed: d.installedOk,
+    resident: d.resident ? { sizeBytes: d.resident.size ?? null, sizeVramBytes: d.resident.size_vram ?? null, expiresAt: d.resident.expires_at ?? null } : null,
+    worker: d.workerAlive ? worker : null,
+    checkedAt: Date.now(),
+  };
 }
 
 function str(v, max) {

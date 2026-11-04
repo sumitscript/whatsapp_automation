@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 
 # BUS_DRIVER=kafka needs the kafka compose profile, or the apps can't reach a broker.
 env_val() { grep -E "^$1=" .env | tail -n1 | cut -d= -f2- | tr -d "\"'" || true; }
-bus="$(env_val BUS_DRIVER)"; bus="${bus:-kafka}"
+bus="$(env_val BUS_DRIVER)"; bus="${bus:-redis}"
 profiles="${COMPOSE_PROFILES:-$(env_val COMPOSE_PROFILES)}"
 case ",$profiles," in *,kafka,*) has_kafka=1 ;; *) has_kafka=0 ;; esac
 if [ "$bus" = kafka ] && [ "$has_kafka" = 0 ]; then

@@ -79,7 +79,17 @@ jobs:
           curl -fsS -b jar 'localhost:3000/api/sessions?active=true&limit=5'
           curl -fsS -b jar localhost:3000/api/settings | grep -q '"replyMode":"session"'
           curl -fsS -b jar -X POST -H 'content-type: application/json' -d '{"query":"projects"}' localhost:3000/api/kb/search
-          curl -fsS -b jar localhost:3000/api/stats
+          curl -fsS -b jar localhost:3000/api/stats | grep -q '"agenda"'
+          curl -fsS -b jar localhost:3000/api/llm/status | grep -q '"state"'
+          # agenda round trip (exercises migration 003 and its SQL): create → list → update → delete
+          id=$(curl -fsS -b jar -X POST -H 'content-type: application/json' \
+            -d '{"kind":"appointment","title":"CI meeting","dueAt":"2030-01-01T10:00:00Z"}' localhost:3000/api/agenda \
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).item.id))")
+          curl -fsS -b jar 'localhost:3000/api/agenda?status=open' | grep -q 'CI meeting'
+          curl -fsS -b jar -X PATCH -H 'content-type: application/json' -d '{"status":"done"}' localhost:3000/api/agenda/$id | grep -q '"status":"done"'
+          curl -fsS -b jar 'localhost:3000/api/agenda?status=done' | grep -q 'CI meeting'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -b jar -X POST -H 'content-type: application/json' -d '{"kind":"nope"}' localhost:3000/api/agenda)" = "400"
+          curl -fsS -b jar -X DELETE localhost:3000/api/agenda/$id
           curl -fsS -b jar 'localhost:3000/api/logs?limit=5'
           # unauthenticated access must be rejected
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:3000/api/chats)" = "401"

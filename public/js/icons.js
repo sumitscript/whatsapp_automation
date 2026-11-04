@@ -35,4 +35,6 @@ export const icons = {
   download: svg('<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>'),
   brain: svg('<path d="M9 4a3 3 0 0 0-3 3v.2A3 3 0 0 0 4 10a3 3 0 0 0 1 2.2A3 3 0 0 0 6 17a3 3 0 0 0 3 3 3 3 0 0 0 3-3V7a3 3 0 0 0-3-3z"/><path d="M15 4a3 3 0 0 1 3 3v.2a3 3 0 0 1 2 2.8 3 3 0 0 1-1 2.2 3 3 0 0 1-1 4.8 3 3 0 0 1-3 3 3 3 0 0 1-3-3"/>'),
   file: svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>'),
+  agenda: svg('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18M8 14.5h2M12.5 14.5h2M8 17.5h2"/>'),
+  checklist: svg('<path d="m3.5 6.5 1.8 1.8 3-3.3M3.5 12.5l1.8 1.8 3-3.3M3.5 18.5l1.8 1.8 3-3.3M12 7h9M12 13h9M12 19h9"/>'),
 };

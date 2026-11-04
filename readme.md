@@ -51,6 +51,8 @@ Measured on this KB: **0.2–1.1 ms per query**. Try it with `npm run kb:search 
 | Memoized answers in Redis, keyed by model + KB version + language + normalized question | Repeated factual questions answer in ~0 ms; invalidated automatically when the KB changes |
 | Debouncing (900 ms default) | "hi" + "u there?" + "need help" becomes one turn, not three replies |
 | Typing indicator refreshed every 20 s, blue ticks, ordered delivery per chat | Feels like a person on the other end |
+| Agenda | "Let's meet tomorrow at 5" and "remind me to…" are collected into a console page with confirm/decline, to-dos and a WhatsApp ping to you |
+| AI health alerts | If the model goes down you get a WhatsApp message on your own number, and another when it recovers |
 | Owner takeover | If you reply from your phone, the AI pauses in that chat for 30 s (configurable, in seconds) |
 | Instant command replies | Welcome/goodbye/help are templates (0 ms, no LLM); `/hi <question>` answers the question right after the welcome |
 | Context-window budgeting | System prompt + facts + reply budget are reserved first; the newest history that fits `historyTokens` and `num_ctx` is sent, never an overflowing prompt |
@@ -104,7 +106,7 @@ The full walkthrough is in **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**: env val
 You need Node 22.9+, plus Postgres, Redis and Ollama running locally (or `docker compose up -d postgres redis ollama`).
 
 ```bash
-cp .env.example .env          # set BUS_DRIVER=redis to skip Kafka locally
+cp .env.example .env          # Redis is the default bus; set BUS_DRIVER=kafka (and COMPOSE_PROFILES=kafka) to use Kafka
 npm install
 npm run dev:gateway           # http://localhost:3000
 npm run dev:worker

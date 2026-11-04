@@ -1,5 +1,5 @@
 # Production stack for one KVM (tuned for 8 vCPU / 32 GB RAM, CPU-only).
-#   docker compose up -d            (uses COMPOSE_PROFILES from .env; "kafka" by default)
+#   docker compose up -d            (Redis Streams bus by default; set COMPOSE_PROFILES=kafka + BUS_DRIVER=kafka for Kafka)
 # Only Caddy is published to the internet. Ollama, Postgres, Redis and Kafka
 # stay on the private network.
 

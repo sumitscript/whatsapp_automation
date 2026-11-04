@@ -33,6 +33,11 @@ export const DEFAULT_WELCOME =
   "Hey {name}! 👋 *{persona}* here — {owner}'s AI twin. I talk like me, know my work, projects and story, and I'm happy to chat about tech, ideas, jokes, anything. Send {stop} whenever you're done 🙂";
 export const DEFAULT_GOODBYE = 'Bye {name}! 👋 It was fun chatting. Send {start} anytime to talk to {persona} again — the real {owner} will see this chat too.';
 
+export const DEFAULT_UNSUPPORTED =
+  "Hey {name}! I can only read text messages right now, so I can't open {kind} 🙈 Could you type it out for me? If it's urgent, I'll let the real {owner} know.";
+export const DEFAULT_TIMEOUT =
+  "Hey {name}, it's been quiet for a while, so I'm signing off for now 👋 Send {start} whenever you want to chat again — the real {owner} will see this chat too.";
+
 export const DEFAULT_SETTINGS = Object.freeze({
   replyMode: 'session', // session (/hi … /bye) | all | off
   model: 'gemma3:4b',
@@ -56,6 +61,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
   sessionIdleMinutes: 30,
   welcomeMessage: DEFAULT_WELCOME,
   goodbyeMessage: DEFAULT_GOODBYE,
+  unsupportedMessage: DEFAULT_UNSUPPORTED, // reply to voice notes, images, stickers… ({kind} = "voice notes", "photos"…)
+  notifyOnTimeout: true, // tell the contact when their session ended because of inactivity
+  timeoutMessage: DEFAULT_TIMEOUT,
+  alertOwner: true, // WhatsApp the owner (own number) when the LLM goes down / recovers
+  agendaEnabled: true, // pull appointments + to-dos out of chats into the Agenda
+  notifyOwnerOnAgenda: true, // WhatsApp the owner (own number) about new agenda items
+  timezone: 'Asia/Kolkata', // IANA zone used to read "tomorrow at 5pm"
   persona: '', // empty = built-in DEFAULT_PERSONA (keeps getting improvements on updates)
 });
 
@@ -90,9 +102,24 @@ const RULES = {
   sessionIdleMinutes: (v) => intIn(v, 0, 24 * 60),
   welcomeMessage: text(1, 1000),
   goodbyeMessage: text(1, 1000),
+  unsupportedMessage: text(1, 1000),
+  notifyOnTimeout: bool,
+  timeoutMessage: text(1, 1000),
+  alertOwner: bool,
+  agendaEnabled: bool,
+  notifyOwnerOnAgenda: bool,
+  timezone: (v) => (typeof v === 'string' && isTimeZone(v.trim()) ? v.trim() : undefined),
   persona: (v) => (typeof v === 'string' && !v.trim() ? '' : text(20, 8000)(v)),
 };
 
+function isTimeZone(tz) {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: tz });
+    return tz.length > 0 && tz.length <= 60;
+  } catch {
+    return false;
+  }
+}
 function numIn(v, lo, hi) {
   const n = typeof v === 'string' ? Number(v) : v;
   return typeof n === 'number' && Number.isFinite(n) && n >= lo && n <= hi ? n : undefined;
@@ -132,11 +159,12 @@ export function renderPersona(settings) {
 }
 
 /** Fill a welcome/goodbye template. */
-export function renderTemplate(template, settings, { name } = {}) {
+export function renderTemplate(template, settings, { name, kind } = {}) {
   const first = String(name || '').trim().split(/\s+/)[0];
   const list = (v) => String(v || '').split(',')[0].trim();
   return String(template || '')
     .replaceAll('{name}', first || 'there')
+    .replaceAll('{kind}', kind || 'that kind of message')
     .replaceAll('{persona}', settings.personaName || 'eSumit')
     .replaceAll('{owner}', firstName(settings))
     .replaceAll('{start}', list(settings.startCommands) || '/hi')

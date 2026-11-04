@@ -15,6 +15,7 @@ export const state = {
 const NAV = [
   { route: 'chats', label: 'Chats', icon: icons.chats },
   { route: 'contacts', label: 'Contacts', icon: icons.contacts },
+  { route: 'agenda', label: 'Agenda', icon: icons.agenda },
   { route: 'dashboard', label: 'Dashboard', icon: icons.dashboard },
   { route: 'logs', label: 'Logs', icon: icons.logs },
   { route: 'kb', label: 'Knowledge base', icon: icons.kb },
@@ -25,6 +26,7 @@ const NAV = [
 const VIEWS = {
   chats: () => import('./views/chats.js'),
   contacts: () => import('./views/contacts.js'),
+  agenda: () => import('./views/agenda.js'),
   dashboard: () => import('./views/dashboard.js'),
   logs: () => import('./views/logs.js'),
   kb: () => import('./views/knowledge.js'),

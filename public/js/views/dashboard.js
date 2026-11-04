@@ -13,6 +13,10 @@ function tile(label, value, sub = '') {
   )}</div>`;
 }
 
+function linkTile(href, label, value, sub = '') {
+  return html`<a class="stat-tile agenda-tile-link" href="${href}"><div class="stat-label">${label}</div><div class="stat-value">${value}</div><div class="stat-sub muted">${sub}</div></a>`;
+}
+
 function chart(hourly) {
   const data = (hourly || []).slice(-24);
   if (!data.length) return '<p class="muted">No traffic in the last 24 hours.</p>';
@@ -121,6 +125,9 @@ export async function mount(root, { hub }) {
         tile('Avg latency', formatMs(st.avgLatencyMs), `p95 ${formatMs(st.p95LatencyMs)}`),
         tile('Active chats (24 h)', formatNumber(st.activeChats24h)),
         tile('Active sessions', formatNumber(st.activeSessions), `${formatNumber(st.sessionsToday)} started today`),
+        ...(st.agenda
+          ? [linkTile('#/agenda', 'Agenda', formatNumber(st.agenda.review), `needs review · ${formatNumber(st.agenda.today)} today · ${formatNumber(st.agenda.overdue)} overdue`)]
+          : []),
         tile('Contacts', formatNumber(st.contacts)),
         tile('Knowledge sections', formatNumber(st.kbSections)),
       ].join('');
@@ -141,7 +148,14 @@ export async function mount(root, { hub }) {
     clearTimeout(sessTimer);
     sessTimer = setTimeout(loadSessions, 500);
   });
+  let llmTimer = 0;
+  const offLlm = hub.on('llm:status', () => {
+    clearTimeout(llmTimer);
+    llmTimer = setTimeout(loadLlm, 400);
+  });
   const off = () => {
+    offLlm();
+    clearTimeout(llmTimer);
     offStatus();
     offChat();
     clearTimeout(sessTimer);

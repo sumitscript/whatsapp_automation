@@ -8,6 +8,7 @@
 import { INTENT_PROFILES, isFollowUp, resolveIntent } from './intent.js';
 import { replyLanguage, statedLanguagePreference } from './lang.js';
 import { MessageChunker } from './format.js';
+import { buildExtractionMessages, heuristicItem, isMeetingRequest, parseExtraction, resolveItems } from './agenda.js';
 import { estimateTokens, normalize } from '../rag/text.js';
 import { ownerAliasList, renderPersona } from '../core/settings-schema.js';
 import { clamp, sha1 } from '../core/util.js';
@@ -131,6 +132,7 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     }
     if (wantsAnswer) rules.push('They want the answer: give it directly and correctly first; if their idea was wrong, correct it kindly.');
     if (askedQuestionLast) rules.push("What I said last already asked a question: don't end this one with a question.");
+    if (isMeetingRequest(text)) rules.push(`This asks ${owner} for a meeting, call or favour. Don't agree, refuse or promise anything for me: say I'll pass it on and the real ${owner} will confirm.`);
     if (wordTarget) rules.push(`They asked for about ${wordTarget} words: write at least that much.`);
     rules.push(replyTo
       ? 'Continue exactly what I said last offered or asked. Do not switch to another topic.'
@@ -315,7 +317,33 @@ Return ONLY the updated notes.`,
     return out || null;
   }
 
-  return { respond, summarize };
+  /**
+   * Read the conversation for commitments (meetings, to-dos). Runs off the hot path.
+   * The model decides what the item is; dates are read deterministically.
+   * @returns {Promise<object[]>} items with { kind, title, details, location, dueAt, allDay, dueText }
+   */
+  async function extractAgenda({ turns, text, contactName, settings, now = new Date() }) {
+    const timeZone = settings.timezone || 'Asia/Kolkata';
+    let items = null;
+    try {
+      let out = '';
+      const messages = buildExtractionMessages({ ownerName: settings.ownerName, contactName, turns, now, timeZone });
+      for await (const ev of llm.chat({ model: settings.model, messages, temperature: 0.1, maxTokens: 220 })) {
+        if (ev.type === 'token') out += ev.text;
+      }
+      items = parseExtraction(out);
+    } catch (err) {
+      log?.warn('Agenda extraction failed', { err });
+    }
+    const userTexts = turns.filter((t) => t.role === 'user').map((t) => t.content);
+    const resolved = items ? resolveItems(items, { text, userTexts, now, timeZone }) : [];
+    if (resolved.length) return resolved;
+    // The model failed or found nothing: a plain "let's meet tomorrow at 5" is still worth keeping.
+    const h = heuristicItem({ text, contactName, now, timeZone });
+    return h && (items === null || (h.kind === 'appointment' && isMeetingRequest(text))) ? [h] : [];
+  }
+
+  return { respond, summarize, extractAgenda };
 }
 
 /** In-process stores (tests, playground without Redis). */

@@ -21,6 +21,7 @@ COPY src ./src
 COPY public ./public
 COPY db ./db
 COPY scripts ./scripts
+COPY test/eval ./test/eval
 COPY knowledge_base ./knowledge_base
 
 RUN mkdir -p /app/.wwebjs_auth /app/.wwebjs_cache && chown -R node:node /app

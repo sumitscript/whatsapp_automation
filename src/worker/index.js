@@ -13,6 +13,7 @@ import { createBus, TOPICS } from '../bus/index.js';
 import { KnowledgeBase } from '../rag/kb.js';
 import { OllamaClient } from '../llm/ollama.js';
 import { createBrain } from '../brain/pipeline.js';
+import { looksLikeCommitment, sameItem } from '../brain/agenda.js';
 
 const log = logger.child({ component: 'worker' });
 const STALE_JOB_MS = 5 * 60_000; // don't answer messages that sat in the queue during downtime
@@ -79,7 +80,7 @@ const publishStatus = () =>
   redis
     .set(
       keys.workerStatus,
-      JSON.stringify({ at: Date.now(), startedAt, model: modelState, inFlight, lanes: lanes.size, folding, queuedFolds: foldQueue.size, concurrency: config.ollama.concurrency, bus: bus.driver, kb: kb.version, lastReply, lastError }),
+      JSON.stringify({ at: Date.now(), startedAt, model: modelState, inFlight, lanes: lanes.size, folding, queuedFolds: foldQueue.size + agendaQueue.size, concurrency: config.ollama.concurrency, bus: bus.driver, kb: kb.version, lastReply, lastError }),
       'EX',
       20,
     )
@@ -122,6 +123,34 @@ async function handleJob(job) {
   // Conversation outgrew the verbatim window → fold the oldest turns into long-term memory later.
   const stored = (await memory.get(job.chatId).catch(() => [])).length;
   if (stored > s.historyTurns + 8) scheduleFold(job.chatId, false);
+  // "let's meet tomorrow at 5" → Agenda (off the hot path, like memory folds).
+  if (s.agendaEnabled && looksLikeCommitment(job.text)) agendaQueue.set(job.chatId, { text: job.text, contactName: job.contactName || null, at: Date.now() });
+}
+
+// ---- Agenda: appointments / to-dos spotted in chats ----
+const agendaQueue = new Map(); // chatId → latest message that looks like a commitment
+async function extractAgendaFor(chatId, { text, contactName }) {
+  const s = settings.get();
+  if (!s.agendaEnabled) return;
+  await modelReady;
+  const turns = await memory.get(chatId);
+  const found = await brain.extractAgenda({ turns, text, contactName, settings: s });
+  if (!found.length) return log.debug('No agenda items found', { chatId });
+  const existing = await repo.listAgenda({ view: 'open', chatId });
+  for (const it of found) {
+    const draft = { ...it, chatId, sourceMessage: text.slice(0, 500), source: 'ai' };
+    const same = existing.find((e) => sameItem(e, draft));
+    if (same) {
+      // The person is refining an earlier proposal ("make it 6pm"): keep the item, update what changed.
+      const saved = await repo.updateAgendaItem(same.id, { title: draft.title, details: draft.details ?? same.details, dueAt: draft.dueAt ?? same.dueAt, allDay: draft.dueAt ? draft.allDay : same.allDay, dueText: draft.dueText ?? same.dueText, location: draft.location ?? same.location });
+      log.info('Agenda item updated', { chatId, id: same.id });
+      await bus.publish(TOPICS.outbound, chatId, { type: 'agenda', chatId, itemId: saved.id, created: false });
+    } else {
+      const saved = await repo.createAgendaItem(draft);
+      log.info('Agenda item created', { chatId, id: saved.id, kind: saved.kind, dueAt: saved.dueAt });
+      await bus.publish(TOPICS.outbound, chatId, { type: 'agenda', chatId, itemId: saved.id, created: true });
+    }
+  }
 }
 
 // ---- Long-term memory: folded only while no reply is being generated ----
@@ -149,14 +178,27 @@ async function fold(chatId, { all }) {
   await bus.publish(TOPICS.outbound, chatId, { type: 'memory', chatId });
 }
 setInterval(async () => {
-  if (folding || inFlight > 0 || !foldQueue.size) return;
-  const [chatId, opts] = foldQueue.entries().next().value;
-  foldQueue.delete(chatId);
+  if (folding || inFlight > 0 || (!foldQueue.size && !agendaQueue.size)) return;
   folding = true;
   try {
-    await gate.run(() => fold(chatId, opts));
-  } catch (err) {
-    log.warn('Memory fold failed', { chatId, err });
+    if (agendaQueue.size) {
+      // Agenda first: a meeting request is more time-sensitive than a memory summary.
+      const [chatId, req] = agendaQueue.entries().next().value;
+      agendaQueue.delete(chatId);
+      try {
+        await gate.run(() => extractAgendaFor(chatId, req));
+      } catch (err) {
+        log.warn('Agenda extraction failed', { chatId, err });
+      }
+      return;
+    }
+    const [chatId, opts] = foldQueue.entries().next().value;
+    foldQueue.delete(chatId);
+    try {
+      await gate.run(() => fold(chatId, opts));
+    } catch (err) {
+      log.warn('Memory fold failed', { chatId, err });
+    }
   } finally {
     folding = false;
   }

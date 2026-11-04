@@ -50,6 +50,33 @@ const toMessage = (r) =>
     createdAt: r.created_at,
   };
 
+const toAgenda = (r) =>
+  r && {
+    id: Number(r.id),
+    chatId: r.chat_id,
+    contactName: r.contact_name ?? null,
+    phone: r.contact_phone ?? null,
+    kind: r.kind,
+    title: r.title,
+    details: r.details,
+    dueAt: r.due_at,
+    allDay: r.all_day,
+    dueText: r.due_text,
+    location: r.location,
+    status: r.status,
+    source: r.source,
+    sourceMessage: r.source_message,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+
+const AGENDA_SELECT = `SELECT a.*, c.name AS contact_name, c.phone AS contact_phone
+  FROM agenda_items a LEFT JOIN contacts c ON c.chat_id = a.chat_id`;
+const AGENDA_FIELDS = {
+  kind: 'kind', title: 'title', details: 'details', dueAt: 'due_at', allDay: 'all_day', dueText: 'due_text',
+  location: 'location', status: 'status', chatId: 'chat_id',
+};
+
 const toChat = (r) => ({
   ...toContact(r),
   lastMessage: r.last_body ?? null,
@@ -272,6 +299,48 @@ export function createRepo(pool) {
       } finally {
         client.release();
       }
+    },
+
+    // ---------- agenda ----------
+    /** @param {{ view?: 'review'|'open'|'done'|'all', kind?: string, chatId?: string, limit?: number }} f */
+    async listAgenda({ view = 'all', kind, chatId, limit = 300 } = {}) {
+      const where = [];
+      const params = [];
+      if (view === 'review') where.push("a.kind = 'appointment' AND a.status = 'pending'");
+      else if (view === 'open') where.push("a.status IN ('pending', 'confirmed')");
+      else if (view === 'done') where.push("a.status IN ('done', 'declined')");
+      if (kind) where.push(`a.kind = $${params.push(kind)}`);
+      if (chatId) where.push(`a.chat_id = $${params.push(chatId)}`);
+      const order = view === 'done' ? 'a.updated_at DESC' : 'a.due_at ASC NULLS LAST, a.created_at DESC';
+      params.push(Math.min(Number(limit) || 300, 1000));
+      const { rows } = await q(`${AGENDA_SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY ${order} LIMIT $${params.length}`, params);
+      return rows.map(toAgenda);
+    },
+    async getAgendaItem(id) {
+      return toAgenda((await q(`${AGENDA_SELECT} WHERE a.id = $1`, [id])).rows[0]) || null;
+    },
+    async createAgendaItem(it) {
+      const { rows } = await q(
+        `INSERT INTO agenda_items (chat_id, kind, title, details, due_at, all_day, due_text, location, status, source, source_message)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+        [it.chatId ?? null, it.kind, it.title, it.details ?? null, it.dueAt ?? null, !!it.allDay, it.dueText ?? null, it.location ?? null, it.status || 'pending', it.source || 'ai', it.sourceMessage ?? null],
+      );
+      return repo.getAgendaItem(rows[0].id);
+    },
+    async updateAgendaItem(id, patch) {
+      const sets = [];
+      const params = [];
+      for (const [k, col] of Object.entries(AGENDA_FIELDS)) {
+        if (patch[k] === undefined) continue;
+        sets.push(`${col} = $${params.push(patch[k])}`);
+      }
+      if (!sets.length) return repo.getAgendaItem(id);
+      params.push(id);
+      const { rowCount } = await q(`UPDATE agenda_items SET ${sets.join(', ')}, updated_at = now() WHERE id = $${params.length}`, params);
+      return rowCount ? repo.getAgendaItem(id) : null;
+    },
+    async deleteAgendaItem(id) {
+      return (await q('DELETE FROM agenda_items WHERE id = $1', [id])).rowCount > 0;
     },
 
     // ---------- audit + stats ----------

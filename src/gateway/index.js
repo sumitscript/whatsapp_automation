@@ -17,7 +17,8 @@ import { createBrain } from '../brain/pipeline.js';
 import { WhatsAppManager } from './whatsapp.js';
 import { Inbox } from './inbox.js';
 import { SessionManager } from './sessions.js';
-import { createApp } from './http.js';
+import { createApp, probeLlmStatus } from './http.js';
+import { LlmMonitor } from './llm-monitor.js';
 import { createRealtime } from './realtime.js';
 
 const log = logger.child({ component: 'gateway' });
@@ -65,6 +66,9 @@ await bus.subscribe(TOPICS.outbound, 'gateway', (ev) => {
   inbox.handleOutbound(ev);
 });
 
+const llmMonitor = new LlmMonitor({ probe: () => probeLlmStatus({ llm, redis, settings }), settings, inbox, hub, logger: log });
+llmMonitor.start();
+
 server.listen(config.http.port, config.http.host, () => {
   log.info('Gateway listening', { port: config.http.port, bus: bus.driver, kb: kb.version, model: settings.get().model });
 });
@@ -78,6 +82,7 @@ async function shutdown(signal) {
   log.info('Gateway shutting down', { signal });
   inbox.shutdown();
   sessions.stop();
+  llmMonitor.stop();
   server.close();
   await realtime.close().catch(() => {});
   await wa.shutdown().catch(() => {});

@@ -14,6 +14,7 @@
     "dev:worker": "node --watch --env-file-if-exists=.env src/worker/index.js",
     "lint": "node scripts/check-syntax.js",
     "test": "node --test",
+    "eval": "node --env-file-if-exists=.env scripts/eval.js",
     "bench": "node --env-file-if-exists=.env scripts/bench-models.js",
     "kb:search": "node --env-file-if-exists=.env scripts/kb-search.js",
     "create-admin": "node --env-file-if-exists=.env scripts/create-admin.js"
