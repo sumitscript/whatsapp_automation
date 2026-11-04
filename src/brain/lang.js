@@ -29,6 +29,59 @@ const HINGLISH = new Set(
 
 const TAMIL_ROMAN = /\b(enna|epdi|eppadi|sollu|panna|irukku|illa|seri|da|machan)\b/;
 
+const NAMED = {
+  hinglish: { code: 'hi-Latn', name: 'Hinglish (Hindi written in English letters)', script: 'latin' },
+  hindi: { code: 'hi', name: 'Hindi (Devanagari script)', script: 'native' },
+  english: { code: 'en', name: 'English', script: 'latin' },
+  marathi: { code: 'mr', name: 'Marathi (Devanagari script)', script: 'native' },
+  gujarati: { code: 'gu', name: 'Gujarati', script: 'native' },
+  tamil: { code: 'ta', name: 'Tamil', script: 'native' },
+  telugu: { code: 'te', name: 'Telugu', script: 'native' },
+  bengali: { code: 'bn', name: 'Bengali', script: 'native' },
+  kannada: { code: 'kn', name: 'Kannada', script: 'native' },
+  malayalam: { code: 'ml', name: 'Malayalam', script: 'native' },
+  punjabi: { code: 'pa', name: 'Punjabi (Gurmukhi)', script: 'native' },
+  urdu: { code: 'ur', name: 'Urdu (Arabic script)', script: 'native' },
+};
+const LANG_NAMES = Object.keys(NAMED).join('|');
+// "I prefer hinglish", "reply in hindi", "hinglish mein baat karo", "talk to me in english please"
+const PREFERENCE = new RegExp(
+  `\\b(?:prefer(?:s|red)?|reply in|respond in|talk in|speak in|write in|chat in|text in|baat karo|bolo|likho)\\b[^.\\n]{0,20}?\\b(${LANG_NAMES})\\b|\\b(${LANG_NAMES})\\b[^.\\n]{0,12}?\\b(?:mein|me|mai|please|pls|only)\\b[^.\\n]{0,12}?\\b(?:baat|bolo|likho|reply|karo|talk)`,
+  'i',
+);
+
+/**
+ * A language the person explicitly asked for, newest mention wins.
+ * @param {string[]} texts their messages and/or memory notes, oldest first
+ */
+export function statedLanguagePreference(texts) {
+  for (let i = texts.length - 1; i >= 0; i--) {
+    const m = String(texts[i] ?? '').toLowerCase().match(PREFERENCE);
+    if (m) return NAMED[m[1] || m[2]] ?? null;
+  }
+  return null;
+}
+
+/**
+ * The language to answer in: an explicit preference beats a romanised (Latin-letter) message;
+ * otherwise a lone English line inside a Hinglish chat stays Hinglish (people switch
+ * scripts mid-chat, the reply shouldn't).
+ * @param {string} text current message
+ * @param {string[]} previous their earlier messages (oldest first)
+ * @param {string|null} notes long-term memory notes
+ */
+export function replyLanguage(text, previous = [], notes = null) {
+  const current = detectLanguage(text);
+  const stated = statedLanguagePreference([...(notes ? [notes] : []), ...previous, text]);
+  // Writing in a native script (Devanagari, Tamil…) is itself the strongest signal.
+  if (stated && current.script !== 'native') return { ...stated, reason: 'preference' };
+  if (current.code === 'en') {
+    const recent = previous.slice(-3).map(detectLanguage);
+    if (recent.length >= 2 && recent.filter((l) => l.code === 'hi-Latn').length >= 2) return { ...NAMED.hinglish, reason: 'recent' };
+  }
+  return { ...current, reason: 'message' };
+}
+
 export function detectLanguage(text) {
   const s = String(text ?? '');
   let best = null;

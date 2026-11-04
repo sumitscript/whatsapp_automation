@@ -53,7 +53,7 @@ test('long-term memory and the contact name are injected', async () => {
   const brain = createBrain({ kb, llm, memory, cache });
   await run(brain, { chatId: 'm1', text: 'hey whats up', settings, contactName: 'Ravi', longTermMemory: '- Ravi had an interview at Globex' });
   const last = llm.calls[0].messages.at(-1).content;
-  assert.match(last, /\[What I remember about Ravi\]\n\(background[^)]*\)\n- Ravi had an interview at Globex/);
+  assert.match(last, /\[What I remember about Ravi\]\n\(from our earlier chats[^)]*\)\n- Ravi had an interview at Globex/);
   assert.match(last, /\[Chatting with\] Ravi/);
 });
 
@@ -106,7 +106,7 @@ test('history is passed through and long answers split into bubbles', async () =
 });
 
 test('history is trimmed to fit a small context window', async () => {
-  const llm = fakeLlm('sure', { numCtx: 1500 });
+  const llm = fakeLlm('sure', { numCtx: 1800 }); // persona ≈ 750 tokens
   const brain = createBrain({ kb, llm, ...createMemoryStores() });
   const history = Array.from({ length: 30 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `turn ${i} ` + 'x'.repeat(200) }));
   await run(brain, { text: 'continue', settings: { ...settings, historyTurns: 40, historyTokens: 6000 }, history });

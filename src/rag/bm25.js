@@ -60,7 +60,7 @@ export class BM25FIndex {
   /** Closest vocabulary term within a small edit distance (typo tolerance). */
   fuzzy(term) {
     if (term.length < 5 || !/^[a-z]+$/.test(term)) return null;
-    const max = term.length >= 8 ? 2 : 1;
+    const max = term.length >= 6 ? 2 : 1;
     let best = null;
     let bestD = max + 1;
     for (const v of this.vocab) {

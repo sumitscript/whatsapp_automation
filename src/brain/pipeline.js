@@ -6,7 +6,7 @@
 // Prompt layout (keeps Ollama's KV-cache prefix stable across turns):
 //   [system: persona]  [history …]  [user: facts + memory + who + message + language hint]
 import { INTENT_PROFILES, isFollowUp, resolveIntent } from './intent.js';
-import { detectLanguage } from './lang.js';
+import { replyLanguage } from './lang.js';
 import { MessageChunker } from './format.js';
 import { estimateTokens, normalize } from '../rag/text.js';
 import { ownerAliasList, renderPersona } from '../core/settings-schema.js';
@@ -14,7 +14,9 @@ import { clamp, sha1 } from '../core/util.js';
 
 const FALLBACK = "Hmm, I couldn't put a good answer together for that — could you say it another way?";
 const SAFETY_TOKENS = 256;
-const REFERS_TO_PAST = /\b(remember|recall|last time|earlier|before|previously|yaad|pichli baar|pichhli baar|pehle|kal|याद|पिछली)\b/i;
+const REFERS_TO_PAST = /\b(remember|recall|last time|earlier|before|previously|already told|i told you|yaad|pichli baar|pichhli baar|pehle|kal|bataya tha|याद|पिछली)\b/i;
+const WANTS_ANSWER =
+  /\b(not sure|no idea|don'?t know|dont know|idk|tell me the (correct |right )?answer|give me the (correct |right )?answer|(correct|right) answer|just tell me|solution batao|answer batao|pata nahi|nahi pata|nhi pata|bata do|samjha do)\b/i;
 
 /** "yes", "ok sure", "haan bhai", "no", "go on" — a reply to my last message rather than a new topic. */
 export function isShortReply(text) {
@@ -64,23 +66,41 @@ export function selectHistory(turns, { maxMessages, maxTokens }) {
 export function createBrain({ kb, llm, memory, cache, logger }) {
   const log = logger?.child({ component: 'brain' });
 
-  function buildUserTurn({ text, lang, retrieval, intent, contactName, longTerm, owner, replyTo }) {
+  function buildUserTurn({ text, lang, retrieval, intent, contactName, longTerm, owner, replyTo, refersToPast, hadNotes, askedQuestionLast, wantsAnswer }) {
     const parts = [];
-    if (retrieval?.sections.length) parts.push(`[Facts about me]\n${retrieval.context}`);
+    const hasFacts = !!retrieval?.sections.length;
+    if (hasFacts) parts.push(`[Facts about me]\n${retrieval.context}`);
     else if (intent === 'about_owner') parts.push(`[Facts about me]\n(none match — don't guess; say the real ${owner} can answer that one)`);
-    if (longTerm) parts.push(`[What I remember about ${contactName || 'them'}]\n(background from earlier chats — never bring it up on your own)\n${longTerm}`);
-    if (contactName) parts.push(`[Chatting with] ${contactName}`);
+    if (longTerm) {
+      parts.push(`[What I remember about ${contactName || 'them'}]\n(from our earlier chats — use it when it helps, e.g. they continue a topic or mention last time; don't recite it)\n${longTerm}`);
+    }
+    if (contactName) {
+      // Testing from a phone named like the owner made the model think it was talking to itself.
+      const sameAsOwner = contactName.split(/\s+/)[0].toLowerCase() === owner.toLowerCase();
+      parts.push(`[Chatting with] ${contactName} (their WhatsApp name${sameAsOwner ? ` — a different person from me` : ''}; if they told me another name, use that)`);
+    }
     // "yes" / "ok" / "haan" only make sense next to what I just asked; small models
     // otherwise answer an older topic from the history or the notes.
     if (replyTo) parts.push(`[My last message]\n${replyTo.length > 280 ? `${replyTo.slice(0, 280)}…` : replyTo}`);
-    const hint = lang.code === 'und' ? '' : `\n\n(Reply in ${lang.name}.)`;
-    if (!parts.length) return `${text}${hint}`;
+
+    const rules = [];
+    // Without facts a small model fills the gap with an invented job or project.
+    if (!hasFacts && intent !== 'about_owner') rules.push(`No facts about me came with this message: don't mention my job, company, projects, studies or personal life.`);
+    if (refersToPast) {
+      rules.push(hadNotes
+        ? `They're referring to an earlier chat: answer from what I remember about them.`
+        : `They're referring to an earlier chat, but I have no notes about it: say so honestly and ask for a one-line reminder.`);
+    }
+    if (wantsAnswer) rules.push('They want the answer: give it directly and correctly first; if their idea was wrong, correct it kindly.');
+    if (askedQuestionLast) rules.push("My last message already asked a question: don't end this one with a question.");
+    rules.push(replyTo
+      ? 'Continue exactly what my last message offered or asked. Do not switch to another topic.'
+      : 'Answer the message in the flow of our conversation so far. Use the facts/notes only if they directly help; otherwise ignore them and never bring them up.');
+
+    const hint = lang.code === 'und' ? '' : `\n\n(Reply in ${lang.name}${lang.reason === 'preference' ? ' — they asked for it' : ''}.)`;
     const message = replyTo ? `Message (their reply to my last message): ${text}` : `Message: ${text}`;
-    // Small models latch onto whatever block comes first; tell them the message is what to answer.
-    const guard = replyTo
-      ? '(Continue exactly what my last message offered or asked. Do not switch to another topic.)'
-      : '(Answer the message above in the flow of our conversation so far. Use the facts/notes only if they directly help; otherwise ignore them and never bring them up.)';
-    return `${parts.join('\n\n')}\n\n---\n${message}${hint}\n${guard}`;
+    const head = parts.length ? `${parts.join('\n\n')}\n\n---\n` : '';
+    return `${head}${message}${hint}\n(${rules.join(' ')})`;
   }
 
   /**
@@ -92,8 +112,10 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
   async function* respond({ chatId, text, settings, history, contactName, longTermMemory, signal }) {
     const started = performance.now();
     const owner = String(settings.ownerName || 'the owner').split(/\s+/)[0];
-    const lang = detectLanguage(text);
     const turns = history ?? (chatId ? await memory.get(chatId) : []);
+    const theirMessages = turns.filter((t) => t.role === 'user').map((t) => t.content);
+    // "I prefer Hinglish" said once (or kept in the notes) outranks one English message.
+    const lang = replyLanguage(text, theirMessages, settings.memoryEnabled ? longTermMemory : null);
     // "one more" / "another" / "why?" inherit the topic of the previous turn instead of reading as small talk.
     const { intent, inherited } = resolveIntent(text, turns, { ownerAliases: ownerAliasList(settings) });
     const profile = INTENT_PROFILES[intent];
@@ -102,9 +124,13 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     // Long-term notes bridge sessions. Mid-conversation the history already carries the
     // context, and the notes' old topics pull small models off-topic, so they're skipped
     // unless the chat is fresh or the message refers to the past.
-    const longTerm = longTermAvailable && (turns.length < 6 || REFERS_TO_PAST.test(text)) ? longTermAvailable : null;
+    const refersToPast = REFERS_TO_PAST.test(text);
+    const longTerm = longTermAvailable && (turns.length < 6 || refersToPast) ? longTermAvailable : null;
     const lastTurn = turns.at(-1);
     const replyTo = isShortReply(text) && lastTurn?.role === 'assistant' ? lastTurn.content : null;
+    // Stop the "…? …? …?" loop: every reply ending in a question feels like an interrogation.
+    const askedQuestionLast = lastTurn?.role === 'assistant' && /\?\s*[\p{Extended_Pictographic}\s]*$/u.test(lastTurn.content);
+    const wantsAnswer = WANTS_ANSWER.test(text);
 
     // --- Retrieval (vectorless, ~1ms) ---
     let retrieval = null;
@@ -142,7 +168,10 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     }
 
     // --- Context window: system + notes + reply budget first, history gets the rest ---
-    const userTurn = buildUserTurn({ text, lang, retrieval, intent, contactName, longTerm, owner, replyTo });
+    const userTurn = buildUserTurn({
+      text, lang, retrieval, intent, contactName, longTerm, owner, replyTo,
+      refersToPast, hadNotes: !!longTermAvailable, askedQuestionLast, wantsAnswer,
+    });
     const maxTokens = clamp(Math.round(settings.maxTokens * profile.tokenScale), 48, 2048);
     const numCtx = llm.numCtx || 4096;
     const historyBudget = Math.max(0, Math.min(settings.historyTokens ?? 1500, numCtx - estimateTokens(system) - estimateTokens(userTurn) - maxTokens - SAFETY_TOKENS));
@@ -188,6 +217,7 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
       chatId,
       intent,
       lang: lang.code,
+      langReason: lang.reason,
       latencyMs,
       firstChunkMs,
       tps,
@@ -223,7 +253,7 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
       {
         role: 'system',
         content: `You keep ${settings.personaName || 'eSumit'}'s private memory notes about a WhatsApp contact (${who}). ${settings.personaName || 'eSumit'} is ${owner}'s AI twin.
-Write concise English bullet points, at most 120 words in total, in past tense ("Asked about…", "Likes…"). Keep: their name and who they are, how they know ${owner} if stated, interests and preferences, topics they discussed, anything they asked to pass on to the real ${owner}, preferred language/tone. These are background facts, not a to-do list: never write things like "wants to continue" or "still needs". Drop greetings, jokes and small talk. Never store passwords, OTPs, card or bank details.
+Write concise English bullet points, at most 120 words in total, in past tense ("Asked about…", "Likes…"). Start with "- Name: …" using the name they introduced themselves with (their WhatsApp name is only "${who}" and may belong to someone else). Keep: who they are, how they know ${owner} if stated, interests and preferences, topics they discussed, anything they asked to pass on to the real ${owner}, preferred language/tone (write it as "Prefers Hinglish" etc. if they said so). These are background facts, not a to-do list: never write things like "wants to continue" or "still needs". Drop greetings, jokes and small talk. Never store passwords, OTPs, card or bank details.
 Return ONLY the updated notes.`,
       },
       { role: 'user', content: `Existing notes:\n${previous || '(none)'}\n\nNew conversation:\n${lines.join('\n')}` },

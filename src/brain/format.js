@@ -70,6 +70,21 @@ export class MessageChunker {
     // Outside a code fence only: count fences before each candidate cut.
     const fenceOpenAt = (i) => (b.slice(0, i).match(/```/g) || []).length % 2 === 1;
 
+    // First bubble: send it at the first full sentence instead of waiting for a paragraph
+    // break — on CPU that's seconds earlier, and people text in short bursts anyway.
+    if (this.sent === 0) {
+      const re = /[.!?।](?=\s)/g;
+      re.lastIndex = Math.max(0, this.minChars - 1); // the sentence (incl. its full stop) must be ≥ minChars
+      for (let m = re.exec(b); m; m = re.exec(b)) {
+        const end = m.index + 1;
+        const para = b.indexOf('\n\n');
+        if (para >= this.minChars && para < end) break; // a paragraph break comes first: use the rule below
+        if (b.length <= end + 1 || fenceOpenAt(end)) break; // need to see what follows; never inside code
+        if (/^\s*(```|\n?[-*\d])/.test(b.slice(end))) break; // keep a list or code attached to its lead-in
+        return end + 1;
+      }
+    }
+
     let idx = b.indexOf('\n\n');
     while (idx >= 0) {
       if (idx >= this.minChars && !fenceOpenAt(idx)) {

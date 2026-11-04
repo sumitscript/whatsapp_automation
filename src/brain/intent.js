@@ -1,3 +1,5 @@
+import { editDistance } from '../rag/text.js';
+
 // Zero-latency intent routing. Picking the intent with regexes (instead of an
 // extra LLM call) keeps CPU inference fast; the intent then tunes retrieval,
 // temperature and the length budget of the reply.
@@ -8,9 +10,33 @@ const JOKE = /(😂|🤣|😆|😜|😝|😹|😅|\bha(ha)+\b|\bhe(he)+\b|\blo+l
 const CODE = /(```|\b(code|coding|function|bug|debug|error|exception|stack ?trace|compile|syntax|regex|sql|query|api|endpoint|python|javascript|typescript|java|c\+\+|cpp|golang|rust|react|node|express|django|flask|fastapi|docker|kubernetes|git|leetcode|algorithm|complexity|recursion|array|linked list|class|object|async|promise|npm|pip)\b|[{};]\s*$|=>|\bdef\s+\w+\(|\bconsole\.log\b)/i;
 const MATH = /^[\d\s+\-*/().%^=x×÷]+$|\d\s*[+\-*/×÷^%]\s*\d|\b(calculate|solve|integral|derivative|equation|percent of|kitna hota)\b/i;
 const OWNER_WORDS = /\b(you|your|yours|u|ur|tum|tumhara|tumhari|aap|aapka|aapki|tera|teri|he|his|him|uska|uski|unka|unki)\b/i;
+const OWNER_POSSESSIVE = /\b(your|yours|ur|tumhara|tumhari|tumhare|aapka|aapki|aapke|tera|teri|tere|his|uska|uski|unka|unki)\b/i;
+const USER_WORDS = /\b(my|mine|i|i'm|im|me|mera|meri|mere|mujhe|mujhko|main|apna|apni)\b/i;
 const PROFILE = /\b(work|working|job|naukri|kaam|company|intern|internship|experience|project|projects|skill|skills|tech ?stack|college|university|degree|cgpa|gpa|study|padhai|education|resume|cv|portfolio|github|linkedin|website|contact|email|phone|number|hire|hiring|available|availability|open to work|achievement|certificate|certification|hackathon|blog|article|extension|location|city|rehte|from where|kahan se|age|about yourself|introduce|who are you|kaun ho|tum kaun)\b/i;
 
+// Single profile words, matched with typo tolerance ("pojcet", "experiance", "certifcate").
+// Only words ≥ 6 letters: shorter ones collide with everyday words.
+const PROFILE_WORDS = [
+  'project', 'projects', 'experience', 'company', 'internship', 'college', 'university', 'degree', 'skills',
+  'education', 'resume', 'portfolio', 'github', 'linkedin', 'website', 'contact', 'achievement', 'achievements',
+  'certificate', 'certificates', 'certification', 'certifications', 'hackathon', 'article', 'articles', 'working',
+  'naukri', 'padhai', 'location',
+];
+
+function hasProfileWord(lower) {
+  if (PROFILE.test(lower)) return true;
+  for (const w of lower.match(/[a-z]{6,}/g) || []) {
+    for (const p of PROFILE_WORDS) {
+      if (p[0] === w[0] && Math.abs(p.length - w.length) <= 2 && editDistance(w, p, 2) <= 2) return true;
+    }
+  }
+  return false;
+}
+
 /**
+ * About-me = a profile topic (work, projects, college…, typos allowed) AND either a
+ * "you / tum / aap" word or a short message ("projects?"). "tum meri help karo" has
+ * no profile topic, so it stays general.
  * @param {string} text
  * @param {{ ownerAliases?: string[] }} [opts]
  * @returns {'greeting'|'thanks'|'joke'|'coding'|'math'|'about_owner'|'general'}
@@ -25,7 +51,12 @@ export function classifyIntent(text, { ownerAliases = [] } = {}) {
     const esc = a.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`(^|[^\\p{L}])${esc}([^\\p{L}]|$)`, 'u').test(lower);
   });
-  if (mentionsOwner || (PROFILE.test(lower) && (OWNER_WORDS.test(lower) || words.length <= 6))) return 'about_owner';
+  if (mentionsOwner) return 'about_owner';
+  if (hasProfileWord(lower)) {
+    // "your project" / "tumhara college" is about me; "my project" / "check my resume" is about them.
+    const aboutThem = USER_WORDS.test(lower);
+    if (OWNER_POSSESSIVE.test(lower) || (!aboutThem && (OWNER_WORDS.test(lower) || words.length <= 6))) return 'about_owner';
+  }
   if (CODE.test(s)) return 'coding';
   if (MATH.test(lower) && /\d/.test(lower)) return 'math';
   if (JOKE.test(s)) return 'joke';
