@@ -54,6 +54,8 @@ Tests, lint and `kb:search` run **without `node_modules`**. The modules they tou
 - `detectLanguage` produces the "(Reply in X.)" hint. Follow-ups reuse the previous user turn as the retrieval query.
 - **Context window:** `selectHistory` keeps the newest turns within `min(historyTokens, numCtx − system − final turn − maxTokens − 256)` and `historyTurns` messages. It starts on a user turn and merges same-role runs.
 - The final user turn carries `[Facts about me]`, `[What I remember about <name>]`, `[Chatting with]`, then the message and the language hint. The persona prompt refers to these labels, so keep them in sync.
+- Short replies ("yes", "ok", "haan") get `[My last message]` (the previous assistant turn) next to them so a small model continues that offer instead of an older topic. Long-term notes are only injected when the chat is fresh (< 6 stored turns) or the message refers to the past; mid-conversation they pulled models back to old topics. If generation stops on `doneReason: 'length'`, the last bubble is cut back to a full sentence (`trimDangling`).
+- `settings.persona` empty means the built-in `DEFAULT_PERSONA`, so prompt improvements ship with updates. A saved custom persona overrides it.
 - KB notes go into the **last user turn**, not the system prompt, so the system prompt + history prefix stays stable for Ollama's prompt cache.
 - Chat memory in Redis stores raw text only, never the notes.
 - Answer cache only for standalone `about_owner` questions that had KB hits. Its key includes `kb.version` and a hash of the rendered persona, so KB or persona edits invalidate it.

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { createBrain, createMemoryStores, selectHistory } from '../src/brain/pipeline.js';
+import { createBrain, createMemoryStores, isShortReply, selectHistory, trimDangling } from '../src/brain/pipeline.js';
 import { KnowledgeBase } from '../src/rag/kb.js';
 import { DEFAULT_SETTINGS } from '../src/core/settings-schema.js';
 
@@ -53,7 +53,7 @@ test('long-term memory and the contact name are injected', async () => {
   const brain = createBrain({ kb, llm, memory, cache });
   await run(brain, { chatId: 'm1', text: 'hey whats up', settings, contactName: 'Ravi', longTermMemory: '- Ravi had an interview at Globex' });
   const last = llm.calls[0].messages.at(-1).content;
-  assert.match(last, /\[What I remember about Ravi\]\n- Ravi had an interview at Globex/);
+  assert.match(last, /\[What I remember about Ravi\]\n\(background[^)]*\)\n- Ravi had an interview at Globex/);
   assert.match(last, /\[Chatting with\] Ravi/);
 });
 
@@ -192,4 +192,61 @@ test('facts/notes come with a guard telling the model to answer the message', as
   const brain = createBrain({ kb, llm, memory, cache });
   await run(brain, { chatId: 'g1', text: 'hey whats up', settings, contactName: 'Ravi', longTermMemory: '- likes chess' });
   assert.match(llm.calls[0].messages.at(-1).content, /ignore them and never bring them up/);
+});
+
+test('"Yes" is anchored to my last message, not an older topic', async () => {
+  const llm = fakeLlm('Here you go!');
+  const { memory, cache } = createMemoryStores();
+  const brain = createBrain({ kb, llm, memory, cache });
+  await memory.append('y1', [
+    { role: 'user', content: 'Explain Two Sum' },
+    { role: 'assistant', content: 'Use a hash map of complements.' },
+    { role: 'user', content: 'What is multilevel inheritance in Java' },
+    { role: 'assistant', content: 'A → B → C chain of classes. Want an example? 😊' },
+  ]);
+  const { done } = await run(brain, { chatId: 'y1', text: 'Yes', settings });
+  const last = llm.calls[0].messages.at(-1).content;
+  assert.match(last, /\[My last message\]\nA → B → C chain of classes\. Want an example\?/);
+  assert.match(last, /Message \(their reply to my last message\): Yes/);
+  assert.match(last, /Do not switch to another topic/);
+  assert.equal(done.meta.intent, 'coding'); // inherited from the inheritance question
+});
+
+test('long-term notes are used at the start of a chat but skipped mid-conversation', async () => {
+  const llm = fakeLlm('ok');
+  const { memory, cache } = createMemoryStores();
+  const brain = createBrain({ kb, llm, memory, cache });
+  const notes = '- Asked about Two Sum';
+  await run(brain, { chatId: 'n1', text: 'hello there friend', settings, longTermMemory: notes });
+  assert.match(llm.calls[0].messages.at(-1).content, /Asked about Two Sum/);
+
+  const turns = Array.from({ length: 8 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `turn ${i}` }));
+  await memory.append('n2', turns);
+  await run(brain, { chatId: 'n2', text: 'tell me something interesting', settings, longTermMemory: notes });
+  assert.doesNotMatch(llm.calls[1].messages.at(-1).content, /Two Sum/);
+  await run(brain, { chatId: 'n2', text: 'what did we talk about last time', settings, longTermMemory: notes });
+  assert.match(llm.calls[2].messages.at(-1).content, /Asked about Two Sum/);
+});
+
+test('a reply cut off by the token limit is trimmed to a full sentence', async () => {
+  const llm = {
+    numCtx: 4096,
+    async *chat() {
+      yield { type: 'token', text: 'Two Sum is easy. Use a hash map for complements. Abhi toh apne fav tech project ke baareme bhi ba' };
+      yield { type: 'done', stats: { doneReason: 'length', evalTokens: 40, evalMs: 1000 } };
+    },
+  };
+  const brain = createBrain({ kb, llm, ...createMemoryStores() });
+  const { chunks, done } = await run(brain, { text: 'how are you doing today friend', settings: { ...settings, humanize: false } });
+  assert.deepEqual(chunks, ['Two Sum is easy. Use a hash map for complements.']);
+  assert.equal(done.meta.stats.doneReason, 'length');
+});
+
+test('trimDangling and isShortReply edge cases', () => {
+  assert.equal(trimDangling('All done.'), 'All done.');
+  assert.equal(trimDangling('Nice 😄'), 'Nice 😄');
+  assert.equal(trimDangling('```\nconst a = 1'), '```\nconst a = 1\n```');
+  assert.equal(trimDangling('just one long running thought that never ends somew'), 'just one long running thought that never ends…');
+  for (const t of ['Yes', 'ok sure', 'haan bhai', 'go on']) assert.equal(isShortReply(t), true, t);
+  for (const t of ['why?', 'explain the hash map approach please', '']) assert.equal(isShortReply(t), false, t);
 });

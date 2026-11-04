@@ -25,8 +25,8 @@ export async function mount(root, { hub }) {
               </div>
             </fieldset>
             <label class="field"><span>Owner name</span><input name="ownerName" placeholder="Name the assistant represents" /></label>
-            <label class="field"><span>Persona / system prompt</span>
-              <textarea name="persona" rows="8" class="code-area small-area" placeholder="How the assistant should talk and behave"></textarea>
+            <label class="field"><span>Persona / system prompt <span class="muted small">(leave empty to use the built-in eSumit persona, which improves with updates)</span></span>
+              <textarea name="persona" rows="8" class="code-area small-area" placeholder="Empty = built-in eSumit persona (recommended)"></textarea>
             </label>
             <div class="form-grid">
               <label class="field"><span>Temperature <output id="temp-out"></output></span>

@@ -9,6 +9,7 @@ const intent = (t) => classifyIntent(t, { ownerAliases: aliases });
 test('intent routing', () => {
   assert.equal(intent('hi'), 'greeting');
   assert.equal(intent('Good morning!'), 'greeting');
+  for (const t of ['Kya hal hai?', 'Kya haal hai', 'Kaise ho aap', 'how are you', 'kya chal raha hai']) assert.equal(intent(t), 'greeting', t);
   assert.equal(intent('haha that was funny 😂'), 'joke');
   assert.equal(intent('why does my python code throw KeyError?'), 'coding');
   assert.equal(intent('where does Sumit work?'), 'about_owner');

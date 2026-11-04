@@ -2,7 +2,7 @@
 // extra LLM call) keeps CPU inference fast; the intent then tunes retrieval,
 // temperature and the length budget of the reply.
 
-const GREETING = /^(hi+|hello+|hey+|hii+|helo|hlo|yo|sup|namaste|namaskar|namaskaram|vanakkam|sat sri akal|salaam|assalam|good\s?(morning|afternoon|evening|night)|gm|gn|kaise ho|kya haal|kem cho|kasa kay|wassup|whatsup|नमस्ते|हेलो)\b/i;
+const GREETING = /^(hi+|hello+|hey+|hii+|helo|hlo|yo|sup|namaste|namaskar|namaskaram|vanakkam|sat sri akal|salaam|assalam|good\s?(morning|afternoon|evening|night)|gm|gn|kaise ho|kaise hain|kaisa hai|kaisi ho|kya ha+l|kya chal raha|kya scene|how are (you|u)|how r u|hru|kem cho|kasa kay|wassup|whatsup|नमस्ते|हेलो)\b/i;
 const THANKS = /\b(thanks|thank you|thx|ty|dhanyavaad|dhanyawad|shukriya|thnx|शुक्रिया|धन्यवाद)\b/i;
 const JOKE = /(😂|🤣|😆|😜|😝|😹|😅|\bha(ha)+\b|\bhe(he)+\b|\blo+l\b|\blmao\b|\brofl\b|\bjoke\b|\bjokes\b|\bfunny\b|\bmeme\b|\bmazak\b|\bmajak\b|\bmasti\b|\bchutkula\b|\bpj\b|\broast\b|मज़ाक|चुटकुला)/i;
 const CODE = /(```|\b(code|coding|function|bug|debug|error|exception|stack ?trace|compile|syntax|regex|sql|query|api|endpoint|python|javascript|typescript|java|c\+\+|cpp|golang|rust|react|node|express|django|flask|fastapi|docker|kubernetes|git|leetcode|algorithm|complexity|recursion|array|linked list|class|object|async|promise|npm|pip)\b|[{};]\s*$|=>|\bdef\s+\w+\(|\bconsole\.log\b)/i;
