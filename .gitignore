@@ -10,3 +10,6 @@ node_modules/
 
 *.log
 backups/
+
+# LLM matrix reports (scripts/llm-matrix.js)
+eval-results/

@@ -346,9 +346,20 @@ export function createApp(deps) {
       .filter((t) => t && ['user', 'assistant'].includes(t.role) && typeof t.content === 'string')
       .slice(-20)
       .map((t) => ({ role: t.role, content: t.content.slice(0, 4000) }));
+    // Optional per-request model (must be installed) so models can be compared without changing the live setting.
+    let s = settings.get();
+    const wantModel = req.body?.model;
+    if (wantModel !== undefined && wantModel !== s.model) {
+      if (typeof wantModel !== 'string' || !/^[\w.\-/:]{1,100}$/.test(wantModel)) throw httpError(400, 'Invalid model name');
+      const installed = await llm.listModels().catch(() => []);
+      if (!installed.some((m) => m.name === wantModel)) throw httpError(400, `Model "${wantModel}" is not installed`);
+      s = { ...s, model: wantModel };
+    }
+    const contactName = typeof req.body?.contactName === 'string' ? req.body.contactName.trim().slice(0, 80) || undefined : undefined;
+    const longTermMemory = typeof req.body?.longTermMemory === 'string' ? req.body.longTermMemory.slice(0, 1500) || undefined : undefined;
     const bubbles = [];
     let meta = {};
-    for await (const ev of brain.respond({ text: message, settings: settings.get(), history })) {
+    for await (const ev of brain.respond({ text: message, settings: s, history, contactName, longTermMemory })) {
       if (ev.type === 'chunk') bubbles.push(ev.text);
       else if (ev.type === 'done') meta = ev.meta;
     }

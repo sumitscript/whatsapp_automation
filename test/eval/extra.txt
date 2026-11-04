@@ -1,0 +1,7 @@
+# Plain-text suite: one prompt per line. `category | prompt`; `a >> b` chains turns of one conversation.
+# These have no checks, so the matrix runner OBSERVES them (they appear in the transcripts, not in the score).
+txt-chat | hey whats up
+txt-chat | bro i am so tired today, exams are killing me
+txt-context | recommend a good book >> why that one? >> something shorter please
+txt-hinglish | bhai ek mast joke suna >> aur ek
+txt-appointment | can we catch up thursday evening? >> make it 7pm then >> actually friday works better
