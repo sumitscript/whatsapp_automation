@@ -155,47 +155,14 @@ export function containerScroll(section, scroller) {
 
 // ---------------- Macbook scroll ----------------
 
-const KEY_ROWS = [
-  [['esc', 'wide'], 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', ['●', 'power']],
-  [['~ `'], ['! 1'], ['@ 2'], ['# 3'], ['$ 4'], ['% 5'], ['^ 6'], ['& 7'], ['* 8'], ['( 9'], [') 0'], ['— _'], ['+ ='], ['delete', 'wide end']],
-  [['tab', 'wide'], 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', ['{ ['], ['} ]'], ['| \\']],
-  [['caps lock', 'caps'], 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', [': ;'], ['" \''], ['return', 'ret end']],
-  [['shift', 'shift'], 'Z', 'X', 'C', 'V', 'B', 'N', 'M', ['< ,'], ['> .'], ['? /'], ['shift', 'shift end']],
-  [['fn'], ['control'], ['option'], ['command', 'cmd'], ['', 'space'], ['command', 'cmd'], ['option'], ['◂ ▾ ▸', 'arrows']],
-];
-
-function keyboard() {
-  return KEY_ROWS.map(
-    (row) =>
-      `<div class="kb-row">${row
-        .map((k) => {
-          const [label, cls = ''] = Array.isArray(k) ? k : [k];
-          const twoLine = !cls && /^\S \S$/.test(label); // shifted symbol above, base below
-          const parts = twoLine ? label.split(' ').map((p) => `<span>${p}</span>`).join('') : `<span>${label}</span>`;
-          return `<div class="kb-key ${cls}"><div class="kb-cap">${parts}</div></div>`;
-        })
-        .join('')}</div>`,
-  ).join('');
-}
-
-export function macbookMarkup({ titleHtml, screenHtml, badgeHtml = '' }) {
+export function macbookMarkup({ titleHtml, screenHtml }) {
   return `<div class="mb">
     <h2 class="mb-title">${titleHtml}</h2>
     <div class="mb-lid">
-      <div class="mb-lid-back"><div class="mb-lid-logo">${icons.bot}</div></div>
+      <div class="mb-lid-back"><div class="mb-lid-logo">${icons.logo}</div></div>
       <div class="mb-screen"><div class="mb-screen-bg"></div><div class="mb-screen-content">${screenHtml}</div></div>
     </div>
-    <div class="mb-base">
-      <div class="mb-hinge"><div></div></div>
-      <div class="mb-deck">
-        <div class="mb-speaker"></div>
-        <div class="mb-keys">${keyboard()}</div>
-        <div class="mb-speaker"></div>
-      </div>
-      <div class="mb-trackpad"></div>
-      <div class="mb-notch"></div>
-      ${badgeHtml ? `<div class="mb-badge">${badgeHtml}</div>` : ''}
-    </div>
+    <div class="mb-base"><div class="mb-notch"></div></div>
   </div>`;
 }
 

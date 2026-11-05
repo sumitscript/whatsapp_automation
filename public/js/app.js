@@ -119,7 +119,7 @@ function renderShell() {
   document.body.innerHTML = html`
     <div class="app">
       <nav class="rail" aria-label="Main">
-        <div class="rail-brand" title="eSumit Console">${raw(icons.bot)}</div>
+        <div class="rail-brand" title="eSumit Console">${raw(icons.logo)}</div>
         <div class="rail-items">
           ${NAV.map((n) =>
             raw(html`<a class="rail-item" href="#/${n.route}" data-route="${n.route}" aria-label="${n.label}" title="${n.label}">

@@ -2,9 +2,7 @@
 // Below: ContainerScroll (how /hi works), MacbookScroll (the console) and FocusCards (features).
 import { api } from '../api.js';
 import { icons } from '../icons.js';
-import {
-  containerScroll, containerScrollMarkup, evervault, evervaultMarkup, macbookMarkup, macbookScroll, plusIcon,
-} from '../fx.js';
+import { containerScroll, containerScrollMarkup, macbookMarkup, macbookScroll } from '../fx.js';
 import { $, formatWhatsApp, html, raw } from '../util.js';
 
 // Illustrative conversation explaining the commands (static copy, not data).
@@ -19,12 +17,12 @@ const DEMO_CHAT = [
 ];
 
 const FEATURES = [
-  { title: 'Starts with /hi', text: 'Replies only inside a session. /bye, /reset and /help work in any case.', icon: icons.chats, hue: 160 },
-  { title: 'Vectorless RAG', text: 'BM25F over a markdown knowledge base. About 1 ms per lookup.', icon: icons.kb, hue: 200 },
-  { title: 'Remembers people', text: 'Recent turns in Redis, long-term notes in Postgres, folded while idle.', icon: icons.contacts, hue: 260 },
-  { title: 'Speaks Indian languages', text: 'Hindi, Hinglish, Marathi, Tamil, Bengali and more, in the right script.', icon: icons.bot, hue: 30 },
-  { title: 'Local LLM', text: 'Ollama on your own server. No cloud API, no per-message cost.', icon: icons.settings, hue: 330 },
-  { title: 'Live control', text: 'QR pairing, sessions, memory, models and log tail from the browser.', icon: icons.logs, hue: 100 },
+  { title: 'Starts with /hi', text: 'Replies only inside a session. /bye, /reset and /help work in any case.', icon: icons.chats },
+  { title: 'Vectorless RAG', text: 'BM25F over a markdown knowledge base. About 1 ms per lookup.', icon: icons.kb },
+  { title: 'Remembers people', text: 'Recent turns in Redis, long-term notes in Postgres, folded while idle.', icon: icons.contacts },
+  { title: 'Speaks Indian languages', text: 'Hindi, Hinglish, Marathi, Tamil, Bengali and more, in the right script.', icon: icons.globe },
+  { title: 'Local LLM', text: 'Ollama on your own server. No cloud API, no per-message cost.', icon: icons.settings },
+  { title: 'Live control', text: 'QR pairing, sessions, memory, models and log tail from the browser.', icon: icons.logs },
 ];
 
 function demoChat() {
@@ -49,20 +47,23 @@ export function mount(root, { onLogin }) {
   root.innerHTML = html`
     <div class="lp">
       <header class="lp-top">
-        <span class="lp-brand">${raw(icons.bot)} eSumit Console</span>
+        <span class="lp-brand">${raw(icons.logo)} eSumit</span>
         <a class="btn btn-ghost btn-sm" href="#features" id="lp-features">Features</a>
       </header>
 
       <section class="lp-hero">
-        <div class="lp-ev-wrap">
-          ${raw(plusIcon('ev-plus tl'))}${raw(plusIcon('ev-plus bl'))}${raw(plusIcon('ev-plus tr'))}${raw(plusIcon('ev-plus br'))}
-          ${raw(evervaultMarkup('eSumit'))}
-          <h2 class="lp-ev-caption">My AI twin on WhatsApp. It chats as me, in first person, from my own server.</h2>
-          <p class="lp-pill">Local LLM · Indian languages · /hi to start</p>
+        <div class="lp-intro">
+          <h2 class="lp-intro-title">My AI twin on WhatsApp</h2>
+          <p class="lp-intro-text">It chats as me, in first person, from my own server. Replies only happen inside a session you start with <code>/hi</code>.</p>
+          <ul class="lp-points">
+            <li>Local LLM</li>
+            <li>Indian languages</li>
+            <li><code>/hi</code> to start</li>
+          </ul>
         </div>
 
         <div class="login-card" role="main">
-          <div class="login-logo">${raw(icons.bot)}</div>
+          <div class="login-logo">${raw(icons.logo)}</div>
           <h1>Sign in</h1>
           <p class="muted">Manage chats, sessions, memory and models.</p>
           <form id="login-form" novalidate>
@@ -93,17 +94,18 @@ export function mount(root, { onLogin }) {
         ${raw(macbookMarkup({
           titleHtml: 'Every chat, session and memory<br>in one console.',
           screenHtml: consoleSketch(),
-          badgeHtml: `<span class="mb-badge-icon">${icons.bot}</span>`,
+          
         }))}
       </section>
 
       <section id="features" class="lp-section lp-features">
         <h2 class="lp-h2">What's inside</h2>
-        <div class="focus-cards">
+        <div class="feat-grid">
           ${FEATURES.map((f) =>
-            raw(html`<article class="focus-card" style="--h:${f.hue}">
-              <div class="focus-art" aria-hidden="true">${raw(f.icon)}</div>
-              <div class="focus-overlay"><h3>${f.title}</h3><p>${f.text}</p></div>
+            raw(html`<article class="feat">
+              <span class="feat-ico" aria-hidden="true">${raw(f.icon)}</span>
+              <h3>${f.title}</h3>
+              <p>${f.text}</p>
             </article>`),
           )}
         </div>
@@ -115,7 +117,6 @@ export function mount(root, { onLogin }) {
   // Effects (each returns a cleanup; the page is replaced wholesale on login).
   const scroller = root;
   const cleanups = [
-    evervault($('.ev', root)),
     containerScroll($('.cs', root), scroller),
     macbookScroll($('.mb', root), scroller),
   ];

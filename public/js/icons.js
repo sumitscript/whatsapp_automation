@@ -6,6 +6,9 @@ const svg = (body, { fill = false } = {}) =>
   }>${body}</svg>`;
 
 export const icons = {
+  // Brand mark: two overlapping circles (the twin) with the shared part filled.
+  logo: `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false"><circle cx="8.6" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="15.4" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.1A6 6 0 0 1 12 16.9A6 6 0 0 1 12 7.1z" fill="currentColor"/></svg>`,
+  globe: svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>'),
   chats: svg('<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-5A8 8 0 1 1 21 12z"/><path d="M8.5 10.5h7M8.5 13.5h4.5"/>'),
   contacts: svg('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14a6 6 0 0 1 3 6"/>'),
   logs: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12.5 15H17"/>'),
