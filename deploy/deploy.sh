@@ -3,8 +3,13 @@
 #   APP_IMAGE=ghcr.io/<owner>/<repo>:<sha> bash deploy/deploy.sh
 #   SYNC_KB=1 APP_IMAGE=... bash deploy/deploy.sh   # overwrite server KB with the one in the image
 # Rolls back to the previous image automatically if the gateway is not healthy.
-set -euo pipefail
+set -Eeuo pipefail
 cd "$(dirname "$0")/.."
+
+# Readable failures: every phase is timestamped, and any unexpected error names the line and command.
+phase="init"
+step() { phase="$*"; echo "[$(date -u +%H:%M:%S)] → $phase"; }
+trap 'rc=$?; echo "✗ deploy failed in phase \"$phase\" at line $LINENO (exit $rc): $BASH_COMMAND" >&2' ERR
 
 : "${APP_IMAGE:?APP_IMAGE is required}"
 [ -f .env ] || { echo "Missing $(pwd)/.env — copy .env.example and fill it in"; exit 1; }
@@ -27,8 +32,8 @@ set_image() {
   if grep -qE '^APP_IMAGE=' .env; then sed -i "s|^APP_IMAGE=.*|APP_IMAGE=$1|" .env; else echo "APP_IMAGE=$1" >> .env; fi
 }
 
-echo "→ pulling $APP_IMAGE"
-docker pull "$APP_IMAGE"
+step "pulling $APP_IMAGE"
+docker pull "$APP_IMAGE" || { echo "✗ pull failed: wrong image tag (did the build job succeed?), GHCR login/token (read:packages), or no disk space ($(df -h . | awk 'NR==2{print $4" free"}'))"; exit 1; }
 
 # The knowledge base lives on the server (editable from the console). Seed it
 # from the image on first deploy, or when SYNC_KB=1.
@@ -40,20 +45,27 @@ if [ -z "$(ls -A knowledge_base)" ] || [ "${SYNC_KB:-0}" = "1" ]; then
 fi
 
 set_image "$APP_IMAGE"
-echo "→ starting stack"
+step "starting stack (previous image: ${previous:-none})"
 docker compose up -d --remove-orphans
+docker compose ps
 
-echo "→ waiting for gateway health"
-for _ in $(seq 1 60); do
+step "waiting for gateway health (up to 180 s)"
+for i in $(seq 1 60); do
   if docker compose exec -T gateway curl -fsS http://127.0.0.1:3000/readyz >/dev/null 2>&1; then
-    echo "✓ healthy: $APP_IMAGE"
+    echo "✓ healthy after ~$((i * 3)) s: $APP_IMAGE"
     docker image prune -f >/dev/null || true
     exit 0
   fi
+  # Surface a crash loop early instead of waiting out the full timeout.
+  if [ $((i % 5)) -eq 0 ]; then echo "  … $((i * 3)) s: $(docker compose ps --format '{{.Service}}={{.State}}' | tr '\n' ' ')"; fi
   sleep 3
 done
 
-echo "✗ gateway did not become healthy"
+trap - ERR
+echo "✗ gateway did not become healthy within 180 s"
+echo "--- /readyz response ---"; docker compose exec -T gateway curl -sS http://127.0.0.1:3000/readyz 2>&1 | head -c 600 || true; echo
+echo "--- container state ---"; docker compose ps -a || true
+echo "--- gateway + worker logs (last 80) ---"
 docker compose logs --tail=80 gateway worker || true
 if [ -n "$previous" ] && [ "$previous" != "$APP_IMAGE" ]; then
   echo "↩ rolling back to $previous"
