@@ -96,7 +96,7 @@ export async function mount(root, { hub }) {
             <button class="icon-btn" id="models-refresh" aria-label="Refresh models" title="Refresh">${raw(icons.refresh)}</button>
           </div>
           <p class="muted small" id="model-current">Loading…</p>
-          <div id="model-installed" class="model-grid"></div>
+          <div id="model-installed" class="table-scroll"></div>
           <form id="pull-form" class="inline-form">
             <input name="name" list="model-suggestions" placeholder="Install another model, e.g. qwen3:4b" aria-label="Model name to pull" />
             <datalist id="model-suggestions"></datalist>
@@ -226,20 +226,16 @@ export async function mount(root, { hub }) {
       .map((c) => html`<option value="${c.name}"></option>`)
       .join('');
     $('#model-installed', root).innerHTML = inst.length
-      ? inst
-          .map((x) => {
+      ? html`<table class="simple-table models-table"><thead><tr><th>Name</th><th>Params</th><th>Quant</th><th>Size</th><th></th></tr></thead><tbody>
+          ${inst.map((x) => {
             const isCurrent = x.name === m.current;
-            const meta = [x.parameterSize, x.quantization, formatBytes(x.size)].filter(Boolean).join(' · ');
-            return html`<article class="model-card ${raw(isCurrent ? 'current' : '')}">
-              <div class="model-head"><span class="model-name">${x.name}</span></div>
-              <div class="muted small">${meta}</div>
-              <div class="model-actions">
+            return raw(html`<tr class="${raw(isCurrent ? 'current' : '')}">
+              <td class="mono">${x.name}</td><td>${x.parameterSize || '—'}</td><td>${x.quantization || '—'}</td><td>${formatBytes(x.size)}</td>
+              <td class="row-actions">
                 ${raw(isCurrent ? '<span class="badge badge-ok">In use</span>' : html`<button class="btn btn-primary btn-sm" data-use="${x.name}">Use</button>`)}
                 <button class="btn btn-ghost btn-sm" data-del="${x.name}" ${raw(isCurrent ? 'disabled title="Switch to another model before deleting this one"' : 'title="Delete from the server"')}>${raw(icons.trash)} Delete</button>
-              </div>
-            </article>`;
-          })
-          .join('')
+              </td></tr>`);
+          })}</tbody></table>`
       : '<p class="muted small">No models installed yet. Pull one below.</p>';
   }
 

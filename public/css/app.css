@@ -436,6 +436,10 @@ details[open] .log-meta-hint::before { content: '▾ '; }
 .simple-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 6px; }
 .simple-table th { text-align: left; color: var(--muted); font-weight: 500; font-size: 0.75rem; }
 .simple-table th, .simple-table td { padding: 6px; border-bottom: 1px solid var(--border); }
+.table-scroll { overflow-x: auto; }
+.models-table td { vertical-align: middle; }
+.models-table tr.current td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.models-table .row-actions { display: flex; gap: 6px; justify-content: flex-end; align-items: center; white-space: nowrap; }
 .pull-row { margin-top: 10px; }
 .pull-row.error { color: var(--bad); }
 .pull-label { display: flex; justify-content: space-between; gap: 8px; font-size: 0.85rem; margin-bottom: 4px; }
