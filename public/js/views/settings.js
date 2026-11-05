@@ -90,6 +90,7 @@ export async function mount(root, { hub }) {
           </form>
         </section>
 
+        <div class="settings-col">
         <section class="card">
           <div class="card-title-row">
             <h2 class="card-title">AI model</h2>
@@ -127,6 +128,7 @@ export async function mount(root, { hub }) {
             <div class="form-actions"><button class="btn btn-primary" type="submit">Update password</button></div>
           </form>
         </section>
+        </div>
       </div>
     </div>`;
 

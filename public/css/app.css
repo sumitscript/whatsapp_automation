@@ -417,6 +417,7 @@ details[open] .log-meta-hint::before { content: '▾ '; }
 .kb-snippet { margin: 4px 0; font-size: 0.85rem; color: var(--text-2); white-space: pre-wrap; }
 
 /* ---------- settings ---------- */
+.settings-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 18px; align-items: start; }
 .radio-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .radio-card { display: flex; gap: 8px; align-items: flex-start; padding: 10px; border-radius: 10px; border: 1px solid var(--panel-3); cursor: pointer; }
