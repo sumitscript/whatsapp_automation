@@ -104,6 +104,7 @@ jobs:
           port: ${{ secrets.SSH_PORT || 22 }}
           envs: DEPLOY_PATH
           script_stop: true
+          command_timeout: 4m # a stuck docker pull must fail loudly, not hang for the default 10 min
           script: |
             uid="$(id -u)"; gid="$(id -g)"
             echo "deploy user: $(whoami) ($uid:$gid), path: $DEPLOY_PATH"
@@ -112,7 +113,7 @@ jobs:
             bad="$(find "$DEPLOY_PATH" -path "$DEPLOY_PATH/knowledge_base" -prune -o ! -user "$uid" -print 2>/dev/null | head -20)"
             if [ -z "$bad" ]; then echo "✓ all files are owned by $(whoami)"; exit 0; fi
             echo "! not owned by $(whoami) (first 20):"; echo "$bad"
-            docker run --rm -v "$DEPLOY_PATH:/w" alpine:3.20 sh -c "find /w -path /w/knowledge_base -prune -o ! -user $uid -exec chown $uid:$gid {} +" \
+            echo "→ repairing via docker (alpine:3.20; first run pulls the image)"; timeout 150 docker run --rm -v "$DEPLOY_PATH:/w" alpine:3.20 sh -c "find /w -path /w/knowledge_base -prune -o ! -user $uid -exec chown $uid:$gid {} +" \
               || { echo "✗ could not fix ownership. Run once on the server: sudo find $DEPLOY_PATH -path $DEPLOY_PATH/knowledge_base -prune -o -exec chown $(whoami): {} +"; exit 1; }
             echo "✓ ownership repaired"
 
