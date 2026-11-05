@@ -1,7 +1,7 @@
 // Settings, model management, playground and password change.
 import { api } from '../api.js';
 import { icons } from '../icons.js';
-import { $, escapeHtml, formatBytes, formatMs, formatWhatsApp, html, raw, toast } from '../util.js';
+import { $, confirmDialog, escapeHtml, formatBytes, formatMs, formatWhatsApp, html, raw, toast } from '../util.js';
 
 const TIER_LABEL = { fast: 'Fast', balanced: 'Balanced', quality: 'Quality' };
 
@@ -96,13 +96,10 @@ export async function mount(root, { hub }) {
             <button class="icon-btn" id="models-refresh" aria-label="Refresh models" title="Refresh">${raw(icons.refresh)}</button>
           </div>
           <p class="muted small" id="model-current">Loading…</p>
-          <div id="model-catalog" class="model-grid focus-cards"></div>
-          <details class="installed">
-            <summary>Installed on server</summary>
-            <div id="model-installed"></div>
-          </details>
+          <div id="model-installed" class="model-grid"></div>
           <form id="pull-form" class="inline-form">
-            <input name="name" placeholder="Pull any Ollama model, e.g. qwen3:4b" aria-label="Model name to pull" />
+            <input name="name" list="model-suggestions" placeholder="Install another model, e.g. qwen3:4b" aria-label="Model name to pull" />
+            <datalist id="model-suggestions"></datalist>
             <button class="btn btn-ghost" type="submit">${raw(icons.download)} Pull</button>
           </form>
           <div id="pull-progress"></div>
@@ -221,44 +218,47 @@ export async function mount(root, { hub }) {
     const m = s.models;
     if (!m) return;
     $('#model-current', root).innerHTML = html`Current model: <strong>${m.current || '—'}</strong>`;
-    const installedNames = new Set((m.installed || []).map((x) => x.name));
-    const catalog = m.catalog || [];
-    $('#model-catalog', root).innerHTML = catalog.length
-      ? catalog
-          .map((c) => {
-            const installed = c.installed ?? installedNames.has(c.name);
-            const isCurrent = c.name === m.current;
-            const pulling = s.pulls.has(c.name) && !s.pulls.get(c.name).done && !s.pulls.get(c.name).error;
+    const inst = m.installed || [];
+    // Suggestions for the pull box: catalog entries that aren't installed yet.
+    const have = new Set(inst.map((x) => x.name));
+    $('#model-suggestions', root).innerHTML = (m.catalog || [])
+      .filter((c) => !have.has(c.name))
+      .map((c) => html`<option value="${c.name}"></option>`)
+      .join('');
+    $('#model-installed', root).innerHTML = inst.length
+      ? inst
+          .map((x) => {
+            const isCurrent = x.name === m.current;
+            const meta = [x.parameterSize, x.quantization, formatBytes(x.size)].filter(Boolean).join(' · ');
             return html`<article class="model-card ${raw(isCurrent ? 'current' : '')}">
-              <div class="model-head">
-                <span class="model-name">${c.name}</span>
-                <span class="badge tier-${c.tier || 'balanced'}">${TIER_LABEL[c.tier] || c.tier || ''}</span>
-              </div>
-              <div class="muted small">${[c.params, c.languages].filter(Boolean).join(' · ')}</div>
-              <p class="model-note">${c.note || ''}</p>
+              <div class="model-head"><span class="model-name">${x.name}</span></div>
+              <div class="muted small">${meta}</div>
               <div class="model-actions">
-                ${raw(
-                  isCurrent
-                    ? '<span class="badge badge-ok">In use</span>'
-                    : installed
-                      ? html`<button class="btn btn-primary btn-sm" data-use="${c.name}">Use</button>`
-                      : html`<button class="btn btn-ghost btn-sm" data-pull="${c.name}" ${raw(pulling ? 'disabled' : '')}>${raw(icons.download)} ${pulling ? 'Pulling…' : 'Pull'}</button>`
-                )}
-                ${raw(installed && !isCurrent ? '<span class="muted small">installed</span>' : '')}
+                ${raw(isCurrent ? '<span class="badge badge-ok">In use</span>' : html`<button class="btn btn-primary btn-sm" data-use="${x.name}">Use</button>`)}
+                <button class="btn btn-ghost btn-sm" data-del="${x.name}" ${raw(isCurrent ? 'disabled title="Switch to another model before deleting this one"' : 'title="Delete from the server"')}>${raw(icons.trash)} Delete</button>
               </div>
             </article>`;
           })
           .join('')
-      : '<p class="muted">No catalog available.</p>';
+      : '<p class="muted small">No models installed yet. Pull one below.</p>';
+  }
 
-    const inst = m.installed || [];
-    $('#model-installed', root).innerHTML = inst.length
-      ? html`<table class="simple-table"><thead><tr><th>Name</th><th>Params</th><th>Quant</th><th>Size</th><th></th></tr></thead><tbody>
-          ${inst.map((x) =>
-            raw(html`<tr><td>${x.name}</td><td>${x.parameterSize || '—'}</td><td>${x.quantization || '—'}</td><td>${formatBytes(x.size)}</td>
-              <td>${raw(x.name === m.current ? '<span class="badge badge-ok">In use</span>' : html`<button class="btn btn-ghost btn-sm" data-use="${x.name}">Use</button>`)}</td></tr>`)
-          )}</tbody></table>`
-      : '<p class="muted small">No models installed yet.</p>';
+  async function deleteModel(name) {
+    const ok = await confirmDialog({
+      title: 'Delete model?',
+      message: `${name} will be removed from the server and its disk space freed. You can pull it again later.`,
+      confirmText: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const r = await api.deleteModel(name);
+      if (s.models) s.models.installed = r.installed || s.models.installed.filter((x) => x.name !== name);
+      renderModels();
+      toast(`${name} deleted`, 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
   }
 
   async function loadModels() {
@@ -299,6 +299,8 @@ export async function mount(root, { hub }) {
   root.addEventListener('click', (e) => {
     const use = e.target.closest('[data-use]');
     if (use) return useModel(use.dataset.use);
+    const del = e.target.closest('[data-del]');
+    if (del && !del.disabled) return deleteModel(del.dataset.del);
     const p = e.target.closest('[data-pull]');
     if (p) return pull(p.dataset.pull);
   });

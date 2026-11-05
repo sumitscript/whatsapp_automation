@@ -236,6 +236,22 @@ export function createApp(deps) {
     res.json({ ok: true });
   });
 
+  // Remove a model from the Ollama server itself (not just the list). The name comes in the query string
+  // because model names contain ":" and "/".
+  api.delete('/models', async (req, res) => {
+    const name = String(req.query.name || '');
+    if (!/^[\w.\-/:]{1,100}$/.test(name)) throw httpError(400, 'Invalid model name');
+    const sameModel = (a, b) => (a.includes(':') ? a : `${a}:latest`) === (b.includes(':') ? b : `${b}:latest`);
+    if (sameModel(name, settings.get().model)) throw httpError(409, 'This model is in use. Switch to another model first.');
+    if (pulling.has(name)) throw httpError(409, 'This model is still being pulled.');
+    const removed = await llm.deleteModel(name);
+    if (!removed) throw httpError(404, 'Model is not installed');
+    audit(req, 'model.delete', { name });
+    log.info('Model deleted', { name, by: req.user.username });
+    const installed = await llm.listModels().catch(() => []);
+    res.json({ ok: true, installed });
+  });
+
   // ---------- agenda (appointments + to-dos from chats) ----------
   const agendaTz = () => settings.get().timezone || 'Asia/Kolkata';
   // An all-day item is stored as 09:00 on its date in the owner's timezone (the browser sends local midnight).

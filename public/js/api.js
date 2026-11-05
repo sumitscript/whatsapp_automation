@@ -92,6 +92,7 @@ export const api = {
   models: () => request('GET', '/api/models'),
   llmStatus: () => request('GET', '/api/llm/status'),
   pullModel: (name) => request('POST', '/api/models/pull', { name }),
+  deleteModel: (name) => request('DELETE', `/api/models?name=${encodeURIComponent(name)}`),
   playground: (message, history) => request('POST', '/api/playground', { message, history }),
 
   // knowledge base

@@ -85,6 +85,17 @@ export class OllamaClient {
     return last;
   }
 
+  /** Delete a model from the Ollama server (frees its disk space). Resolves false if it wasn't installed. */
+  async deleteModel(name) {
+    try {
+      await this.#request('/api/delete', { method: 'DELETE', body: { model: name }, timeoutMs: 60_000 });
+      return true;
+    } catch (err) {
+      if (err.status === 404) return false;
+      throw err;
+    }
+  }
+
   /** Make sure a model exists locally (optionally pulling it). */
   async ensureModel(name, { autoPull = true, onProgress } = {}) {
     if (await this.hasModel(name)) return true;
