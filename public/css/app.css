@@ -455,11 +455,12 @@ details[open] .log-meta-hint::before { content: '▾ '; }
 .bubble.pending { min-width: 56px; }
 
 /* ---------- dashboard ---------- */
-.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
-.stat-tile { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+/* auto-fit: tiles stretch to fill the row (no empty column on the right); equal heights per row */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 12px; align-items: stretch; }
+.stat-tile { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; min-width: 0; min-height: 92px; }
 .stat-label { font-size: 0.8rem; color: var(--muted); }
 .stat-value { font-size: 1.5rem; font-weight: 500; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
-.stat-sub { font-size: 0.8rem; }
+.stat-sub { font-size: 0.8rem; margin-top: auto; padding-top: 2px; }
 .chart { width: 100%; height: auto; display: block; }
 .chart .grid { stroke: var(--border); stroke-width: 1; }
 .chart .axis { fill: var(--muted); font-size: 11px; }
@@ -667,7 +668,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { box-shadow: 
   .focus-cards:has(> :hover) > :not(:hover) { filter: blur(3px); transform: scale(0.98); opacity: 0.75; }
 }
 /* data grids get a lighter version so numbers stay legible */
-.stat-grid.focus-cards { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.stat-grid.focus-cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 12px; }
 .model-grid.focus-cards { gap: 12px; }
 @media (hover: hover) {
   .stat-grid.focus-cards:has(> :hover) > :not(:hover), .model-grid.focus-cards:has(> :hover) > :not(:hover) { filter: blur(1.5px); opacity: 0.7; }
@@ -886,7 +887,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { box-shadow: 
 .agenda-tile-warn .stat-value { color: var(--warn); }
 .agenda-tile-bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--border)); }
 .agenda-tile-bad .stat-value { color: var(--bad); }
-.agenda-tile-link { display: block; color: inherit; text-decoration: none; }
+.agenda-tile-link { color: inherit; text-decoration: none; }
 .agenda-tile-link:hover, .agenda-tile-link:focus-visible { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .agenda-toolbar { justify-content: space-between; }
 .agenda-notify { color: var(--text-2); }
