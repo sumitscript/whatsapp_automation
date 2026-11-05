@@ -344,8 +344,8 @@ Return ONLY the updated notes.`,
     const resolved = items ? resolveItems(items, { text, userTexts, now, timeZone }) : [];
     if (resolved.length) return resolved;
     // The model failed or found nothing: a plain "let's meet tomorrow at 5" is still worth keeping.
-    const h = heuristicItem({ text, contactName, now, timeZone });
-    return h && (items === null || (h.kind === 'appointment' && isMeetingRequest(text))) ? [h] : [];
+    const h = heuristicItem({ text, contextText: userTexts.slice(-4, -1).join('\n'), contactName, now, timeZone });
+    return h && (items === null || h.kind === 'appointment') ? [h] : [];
   }
 
   return { respond, summarize, extractAgenda };

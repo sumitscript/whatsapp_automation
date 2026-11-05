@@ -6,7 +6,7 @@ import { config } from '../core/config.js';
 import { channels, keys, recentLogs, withinRate } from '../core/redis.js';
 import { catalogWithInstalled } from '../llm/catalog.js';
 import { deriveLlmState } from '../llm/status.js';
-import { localParts, sanitizeAgendaInput, summarizeAgenda, zonedToUtc } from '../brain/agenda.js';
+import { localParts, looksLikeCommitmentInContext, sanitizeAgendaInput, summarizeAgenda, zonedToUtc } from '../brain/agenda.js';
 
 const CHAT_ID = /^[\w.\-:@]{3,120}$/;
 const KB_FILE = /^[\w\-]{1,80}\.(md|txt)$/;
@@ -252,6 +252,21 @@ export function createApp(deps) {
     if (!Number.isInteger(id) || id < 1) throw httpError(400, 'Invalid id');
     return id;
   };
+  // Dry run of the extraction the worker does after each reply: nothing is stored or sent.
+  // Body: { message, history?: [{role, content}], contactName? } → { wouldTrigger, items }
+  api.post('/agenda/preview', async (req, res) => {
+    const message = String(req.body?.message || '').trim().slice(0, 2000);
+    if (!message) throw httpError(400, 'Message required');
+    const history = (Array.isArray(req.body?.history) ? req.body.history : [])
+      .filter((t) => t && ['user', 'assistant'].includes(t.role) && typeof t.content === 'string')
+      .slice(-20)
+      .map((t) => ({ role: t.role, content: t.content.slice(0, 2000) }));
+    const contactName = typeof req.body?.contactName === 'string' ? req.body.contactName.trim().slice(0, 80) || undefined : undefined;
+    const earlier = history.filter((t) => t.role === 'user').map((t) => t.content);
+    const wouldTrigger = looksLikeCommitmentInContext(message, earlier);
+    const items = await brain.extractAgenda({ turns: [...history, { role: 'user', content: message }], text: message, contactName, settings: settings.get() });
+    res.json({ wouldTrigger, timezone: agendaTz(), items });
+  });
   api.get('/agenda', async (req, res) => {
     const view = ['review', 'open', 'done', 'all'].includes(req.query.status) ? req.query.status : 'all';
     const kind = ['appointment', 'todo'].includes(req.query.kind) ? req.query.kind : undefined;

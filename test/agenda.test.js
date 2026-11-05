@@ -189,3 +189,25 @@ test('meeting-request gate: asks for a meeting, not a task that merely mentions 
     assert.equal(isMeetingRequest(t), false, t);
   }
 });
+
+test('loosely typed times: "six p m", "6 p.m", "five o\'clock"', () => {
+  assert.equal(iso(when('tomorrow at six p m near the office')), '2026-11-05T12:30:00.000Z'); // 18:00 IST
+  assert.equal(iso(when('tomorrow at 6 p.m.')), '2026-11-05T12:30:00.000Z');
+  assert.equal(iso(when('tomorrow at five o\'clock')), '2026-11-05T11:30:00.000Z');
+  assert.equal(iso(when('kal seven baje')), '2026-11-05T01:30:00.000Z'); // 7 → 07:00 IST (7–11 stay am)
+  assert.equal(when('tomorrow at six p m').allDay, false);
+});
+
+test('a meeting request split over two messages is still caught (seen in a real chat)', async () => {
+  const { looksLikeCommitmentInContext, heuristicItem } = await import('../src/brain/agenda.js');
+  const details = 'Tomorrow at six p m near zudio office , vadonra , gujarat';
+  assert.equal(looksLikeCommitment('I want to meet'), false); // no time on its own
+  assert.equal(looksLikeCommitment(details), false); // no request on its own
+  assert.equal(looksLikeCommitmentInContext(details, ['How are you', 'Good', 'I want to meet']), true);
+  assert.equal(looksLikeCommitmentInContext(details, ['How are you', 'Good']), false); // nobody asked for anything
+  assert.equal(looksLikeCommitmentInContext('Tomorrow is a holiday', ['I want to meet']), true); // a day counts as a time signal
+  const it = heuristicItem({ text: details, contextText: 'I want to meet', contactName: 'J', now: NOW, timeZone: tz });
+  assert.equal(it.kind, 'appointment');
+  assert.equal(it.title, 'Meet J');
+  assert.equal(it.dueAt.toISOString(), '2026-11-05T12:30:00.000Z');
+});

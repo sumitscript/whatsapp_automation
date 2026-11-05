@@ -67,6 +67,19 @@ const MONTH_RE = Object.keys(MONTHS).sort((a, b) => b.length - a.length).join('|
 
 const EVENING = /\b(evening|night|tonight|shaam|raat|afternoon|dopahar|pm)\b/;
 
+const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+
+/**
+ * People type times loosely: "six p m", "6 p.m", "five o'clock", "at seven baje".
+ * Lower-cases and rewrites those into the digit forms the date reader understands.
+ */
+export function normalizeTimeText(text) {
+  return String(text ?? '')
+    .toLowerCase()
+    .replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b(?=\s*(?:o['’]?clock|[ap]\s?\.?\s?m\b|baje|bje))/g, (w) => String(NUMBER_WORDS[w]))
+    .replace(/(\d)\s*([ap])\s?\.?\s?m\b\.?/g, '$1$2m');
+}
+
 /**
  * Read a date/time from free text ("tomorrow at 5pm", "kal shaam 6 baje",
  * "next friday", "12/11 10:30"). Returns null when the text has no date or time.
@@ -74,7 +87,7 @@ const EVENING = /\b(evening|night|tonight|shaam|raat|afternoon|dopahar|pm)\b/;
  * @returns {{ dueAt: Date, allDay: boolean, matched: string } | null}
  */
 export function parseWhen(text, { now = new Date(), timeZone = 'Asia/Kolkata' } = {}) {
-  const t = String(text ?? '').toLowerCase();
+  const t = normalizeTimeText(text);
   if (!t.trim()) return null;
   const today = localParts(now, timeZone);
   const matched = [];
@@ -134,7 +147,7 @@ export function parseWhen(text, { now = new Date(), timeZone = 'Asia/Kolkata' } 
     minute = +m[2];
     take(m);
   }
-  if (hour == null && (m = /\b(?:at|by|around)\s+(\d{1,2})(?:[:.]([0-5]\d))?\b(?!\s*(?:st|nd|rd|th|\/|-))|\b(\d{1,2})(?:[:.]([0-5]\d))?\s*(?:baje|bje)\b/.exec(t))) {
+  if (hour == null && (m = /\b(?:at|by|around)\s+(\d{1,2})(?:[:.]([0-5]\d))?\b(?!\s*(?:st|nd|rd|th|\/|-))|\b(\d{1,2})(?:[:.]([0-5]\d))?\s*(?:baje|bje|o['’]?clock)\b/.exec(t))) {
     const h = +(m[1] ?? m[3]);
     minute = +(m[2] ?? m[4] ?? 0);
     if (h >= 1 && h <= 23) {
@@ -195,9 +208,23 @@ const ASK = /\b(free|available|availability|let'?s|lets|shall we|can we|can you|
 
 /** Cheap gate so the LLM only reads messages that might hold a commitment. */
 export function looksLikeCommitment(text) {
-  const s = String(text ?? '');
+  const s = normalizeTimeText(text);
   if (s.length < 4 || s.length > 1500) return false;
   return TODO.test(s) || (MEET.test(s) && STRONG_TIME.test(s)) || (STRONG_TIME.test(s) && ASK.test(s));
+}
+
+/**
+ * Same gate, but the request and its details often arrive as separate messages:
+ * "I want to meet" … then "tomorrow at six near the office". A message that carries
+ * a time counts when a recent earlier message from the same person asked for something.
+ * @param {string} text the latest message
+ * @param {string[]} [previousUserTexts] this person's earlier messages, oldest first
+ */
+export function looksLikeCommitmentInContext(text, previousUserTexts = []) {
+  if (looksLikeCommitment(text)) return true;
+  const recent = previousUserTexts.slice(-3).join('\n');
+  if (!recent || String(text ?? '').length > 400) return false;
+  return STRONG_TIME.test(normalizeTimeText(text)) && (MEET.test(recent) || ASK.test(recent) || TODO.test(recent));
 }
 
 /** Gate for prompting the *reply* model to not agree on the owner's behalf. */
@@ -286,9 +313,9 @@ export function resolveItems(items, { text, userTexts = [], now = new Date(), ti
 }
 
 /** Item built without the LLM, when the message is clearly a meeting request. */
-export function heuristicItem({ text, contactName, now = new Date(), timeZone = 'Asia/Kolkata' }) {
+export function heuristicItem({ text, contextText = '', contactName, now = new Date(), timeZone = 'Asia/Kolkata' }) {
   const hit = parseWhen(text, { now, timeZone });
-  const meet = MEET.test(text);
+  const meet = MEET.test(text) || MEET.test(contextText); // "I want to meet" may be an earlier message
   if (!hit && !TODO.test(text)) return null;
   if (meet && hit) {
     return { kind: 'appointment', title: `Meet ${firstName(contactName || 'contact')}`, details: clip(text.trim(), 300), when: hit.matched, dueAt: hit.dueAt, allDay: hit.allDay, dueText: hit.matched, location: null };

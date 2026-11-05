@@ -13,7 +13,7 @@ import { createBus, TOPICS } from '../bus/index.js';
 import { KnowledgeBase } from '../rag/kb.js';
 import { OllamaClient } from '../llm/ollama.js';
 import { createBrain } from '../brain/pipeline.js';
-import { looksLikeCommitment, sameItem } from '../brain/agenda.js';
+import { looksLikeCommitmentInContext, sameItem } from '../brain/agenda.js';
 
 const log = logger.child({ component: 'worker' });
 const STALE_JOB_MS = 5 * 60_000; // don't answer messages that sat in the queue during downtime
@@ -121,10 +121,12 @@ async function handleJob(job) {
     inFlight--;
   }
   // Conversation outgrew the verbatim window → fold the oldest turns into long-term memory later.
-  const stored = (await memory.get(job.chatId).catch(() => [])).length;
-  if (stored > s.historyTurns + 8) scheduleFold(job.chatId, false);
-  // "let's meet tomorrow at 5" → Agenda (off the hot path, like memory folds).
-  if (s.agendaEnabled && looksLikeCommitment(job.text)) agendaQueue.set(job.chatId, { text: job.text, contactName: job.contactName || null, at: Date.now() });
+  const turnsNow = await memory.get(job.chatId).catch(() => []);
+  if (turnsNow.length > s.historyTurns + 8) scheduleFold(job.chatId, false);
+  // "let's meet tomorrow at 5" → Agenda (off the hot path, like memory folds). The request and its
+  // details often come as separate messages ("I want to meet" … "tomorrow at six near the office").
+  const earlierUserTexts = turnsNow.filter((t) => t.role === 'user').map((t) => t.content).slice(0, -1);
+  if (s.agendaEnabled && looksLikeCommitmentInContext(job.text, earlierUserTexts)) agendaQueue.set(job.chatId, { text: job.text, contactName: job.contactName || null, at: Date.now() });
 }
 
 // ---- Agenda: appointments / to-dos spotted in chats ----
