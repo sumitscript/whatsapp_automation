@@ -77,7 +77,7 @@ services:
         limits: { memory: 768m }
 
   ollama:
-    image: ollama/ollama:${OLLAMA_VERSION:-0.12.6} # pinned: same Ollama on every deploy; bump deliberately
+    image: ollama/ollama:${OLLAMA_VERSION:-0.40.14} # pinned: same Ollama on every deploy; bump deliberately
     restart: unless-stopped
     environment:
       OLLAMA_HOST: 0.0.0.0:11434

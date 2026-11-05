@@ -11,7 +11,7 @@ This page lists what the stack uses on the target KVM (8 vCPU / 32 GB RAM, CPU o
 | `caddy` | `caddy:2.10-alpine` | 256 MB | shared | **80, 443/tcp, 443/udp (public)** | TLS, compression, reverse proxy to `gateway:3000` |
 | `gateway` | app image | 2 GB | shared | 3000 (internal) | Node and Chromium (whatsapp-web.js). `shm_size: 1gb` |
 | `worker` | app image | 768 MB | shared | 3001 (internal, `/healthz`) | Node only. The heavy work happens in Ollama |
-| `ollama` | `ollama/ollama:${OLLAMA_VERSION:-0.12.6}` | 20 GB | most of the CPU while generating | 11434 (internal) | `KEEP_ALIVE=-1`, `NUM_PARALLEL=${LLM_CONCURRENCY:-2}`, `MAX_LOADED_MODELS=1`, flash attention, `q8_0` KV cache |
+| `ollama` | `ollama/ollama:${OLLAMA_VERSION:-0.40.14}` | 20 GB | most of the CPU while generating | 11434 (internal) | `KEEP_ALIVE=-1`, `NUM_PARALLEL=${LLM_CONCURRENCY:-2}`, `MAX_LOADED_MODELS=1`, flash attention, `q8_0` KV cache |
 | `postgres` | `postgres:17-alpine` | 1 GB | shared | 5432 (internal) | `shared_buffers=256MB`, `max_connections=50` |
 | `redis` | `redis:7.4-alpine` | 768 MB | shared | 6379 (internal) | AOF, `maxmemory 512mb`, `volatile-lru` |
 | `kafka` | `apache/kafka:3.9.1` | 1 GB | shared | 9092/9093 (internal) | Profile `kafka`, KRaft single node, heap 256–512 MB, 72 h retention |
@@ -119,7 +119,7 @@ Outside the core, the services also use `node:http` (worker health server) and `
 
 ### Container images
 
-`caddy:2.10-alpine`, `node:22-bookworm-slim` (app base, plus Debian `chromium`, `fonts-noto-core`, `fonts-noto-color-emoji`, `dumb-init`, `curl`), `ollama/ollama:0.12.6` (pinned; override with `OLLAMA_VERSION`), `postgres:17-alpine`, `redis:7.4-alpine`, `apache/kafka:3.9.1`.
+`caddy:2.10-alpine`, `node:22-bookworm-slim` (app base, plus Debian `chromium`, `fonts-noto-core`, `fonts-noto-color-emoji`, `dumb-init`, `curl`), `ollama/ollama:0.40.14` (pinned; override with `OLLAMA_VERSION`), `postgres:17-alpine`, `redis:7.4-alpine`, `apache/kafka:3.9.1`.
 
 ### External services
 
