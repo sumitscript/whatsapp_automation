@@ -180,3 +180,12 @@ test('down alerts fire once after the delay and announce recovery', () => {
   assert.equal(a.update('down', 'x', 300_000), null);
   assert.equal(a.update('ok', '', 310_000), null);
 });
+
+test('meeting-request gate: asks for a meeting, not a task that merely mentions one', () => {
+  for (const t of ["let's meet tomorrow at 5pm", 'Call me at 10 am tomorrow', 'Interview is scheduled on 12/11 at 3pm, please confirm', 'Can we reschedule our meeting to friday 3pm?', 'kal shaam 5 baje milte hain?']) {
+    assert.equal(isMeetingRequest(t), true, t);
+  }
+  for (const t of ['{"task":"summarize","text":"The meeting moved to Friday. Budget approved."}', 'summarize: the meeting is on friday', 'what is 2+2', 'tell me a joke']) {
+    assert.equal(isMeetingRequest(t), false, t);
+  }
+});

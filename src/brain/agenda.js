@@ -201,9 +201,13 @@ export function looksLikeCommitment(text) {
 }
 
 /** Gate for prompting the *reply* model to not agree on the owner's behalf. */
+// A task on pasted text ("summarize this: the meeting moved to Friday") mentions meetings but asks for none.
+const TEXT_TASK = /\b(summari[sz]e|summary|translate|explain|rewrite|proofread|what(?:'|’)?s on my)\b/i;
+const DIRECT_ASK = /\b(call|ping|meet|text|message|ring) me|please confirm|pls confirm|confirm (it|this|that|the)\b|can you confirm/i;
 export function isMeetingRequest(text) {
   const s = String(text ?? '');
-  return (MEET.test(s) && (STRONG_TIME.test(s) || ASK.test(s))) || (STRONG_TIME.test(s) && ASK.test(s));
+  if (TEXT_TASK.test(s)) return false;
+  return (MEET.test(s) && (STRONG_TIME.test(s) || ASK.test(s))) || (STRONG_TIME.test(s) && (ASK.test(s) || DIRECT_ASK.test(s))) || (MEET.test(s) && DIRECT_ASK.test(s));
 }
 
 // ---------------------------------------------------------------- extraction

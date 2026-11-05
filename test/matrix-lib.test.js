@@ -117,3 +117,25 @@ test('reports render in txt, md and json without leaking anything odd', () => {
   assert.equal(JSON.parse(renderJson(payload)).rows.length, rows.length);
   assert.doesNotMatch(md + txt, /wa_session/);
 });
+
+test('question-by-question report shows each model\'s answer under the question', async () => {
+  const { renderQa } = await import('../scripts/matrix-lib.js');
+  const md = renderQa({ rows }, { models: ['b:2b', 'a:1b'] });
+  assert.match(md, /### 1\. c1/);
+  assert.ok(md.indexOf('**b:2b**') < md.indexOf('**a:1b**')); // requested order
+  assert.match(md, /check failed: matches: \/x\/ not found/);
+  assert.match(md, /ERROR: timeout/);
+  assert.match(md, /## extra/);
+});
+
+test('a reply that is the model\'s own reasoning always fails, even if it contains the right words', async () => {
+  const { REASONING_LEAK } = await import('../scripts/matrix-lib.js');
+  const leaked = 'We are in a new chat. The user asked about a meeting. I must not commit, so I will pass it on to the real Sumit.';
+  const r = scoreTurn({ passesOn: true }, { reply: leaked });
+  assert.equal(r.pass, false);
+  assert.ok(r.failures.some((f) => f.startsWith('leak:')));
+  assert.equal(REASONING_LEAK.test('<think>hmm</think> Paris'), true);
+  // normal chat is untouched, including the word "user" in everyday use
+  assert.equal(scoreTurn({ notEmpty: true }, { reply: "Hey! I'll pass it on to the real Sumit 😊" }).pass, true);
+  assert.equal(scoreTurn({ notEmpty: true }, { reply: 'Great question for a new user of Python: start with print().' }).pass, true);
+});

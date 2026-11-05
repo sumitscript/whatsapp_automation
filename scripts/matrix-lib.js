@@ -13,7 +13,12 @@ export const PASS_ON =
   /pass(ing)?\s+(it|that|this|the (message|request))?\s*(on|along)|let\s+(the\s+real\s+)?\p{L}+\s+know|check\s+with|get\s+back\s+to\s+you|will\s+confirm|(real|actual)\s+\p{L}+\s+(will|can|should)|ask\s+(the\s+real\s+)?\p{L}+|bata\w*|confirm\s+kar|dekh\w*|pata\s+kar/iu;
 // …and one that commits on the owner's behalf (must not happen).
 export const COMMITS =
-  /see you (there|then|tomorrow)|i'?ll be there|i will be there|it'?s a (date|deal)|sure,? (i'?ll|i will) (be|come|meet)|\bconfirmed\b|pakka|done deal|zaroor aaunga/iu;
+  /see you (there|then|tomorrow)|i['’]?ll be there|i will be there|it['’]?s a (date|deal)|sure,? (i['’]?ll|i will) (be|come|meet)|\bconfirmed\b|pakka|done deal|zaroor aaunga/iu;
+
+// Models that think out loud (qwen3 family, deepseek-r1…) can leak their chain of thought as the reply.
+// That is never an acceptable chat answer, whatever words it happens to contain.
+export const REASONING_LEAK =
+  /\b(the user (asked|said|wants|didn['’]?t|just|has|is asking|says)|my facts block|the (system|instructions?) (says?|prompt)|we are (in a|given|going)|i must (not )?(reply|answer|use|start|be careful)|let me (think|recall|check the)|first, (i|we) (need|must|should))|<think>/iu;
 
 const words = (s) => String(s).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
 
@@ -59,6 +64,8 @@ export const isScored = (spec) => Object.keys(spec).some((k) => ALL_CHECKS.has(k
 export function scoreTurn(spec, result, ctx = {}) {
   const reply = String(result.reply ?? '');
   const { failures } = checkTurn(spec, result);
+  const leak = REASONING_LEAK.exec(reply);
+  if (leak) failures.push(`leak: the reply is the model's own reasoning ("${leak[0]}")`);
   if (spec.notEmpty && !reply.trim()) failures.push('notEmpty: reply is empty');
   if (spec.minChars !== undefined && reply.length < spec.minChars) failures.push(`minChars: ${reply.length} < ${spec.minChars}`);
   if (spec.json && !containsJson(reply)) failures.push('json: no valid JSON in the reply');
@@ -245,3 +252,43 @@ export function renderText({ meta, stats, rows }) {
 }
 
 export const renderJson = ({ meta, stats, rows }) => `${JSON.stringify({ meta, stats, rows }, null, 2)}\n`;
+
+/**
+ * Question-by-question view: every prompt with each model's answer underneath.
+ * @param {{ rows: object[] }} r
+ * @param {{ models?: string[] }} [opts] restrict/order the models shown
+ */
+export function renderQa({ rows }, { models } = {}) {
+  const order = models ?? [...new Set(rows.map((r) => r.model))];
+  const keys = [];
+  const seen = new Set();
+  for (const r of rows) {
+    const k = `${r.caseId}\u0000${r.turn}`;
+    if (!seen.has(k)) {
+      seen.add(k);
+      keys.push([r.caseId, r.turn]);
+    }
+  }
+  const out = [`# Every question and answer`, '', `Models: ${order.join(', ')}. ✅ passed its checks, ❌ failed, · observed only (no checks).`, ''];
+  let lastCat = null;
+  let n = 0;
+  for (const [caseId, turn] of keys) {
+    const here = rows.filter((r) => r.caseId === caseId && r.turn === turn);
+    const first = here[0];
+    if (first.category !== lastCat) {
+      lastCat = first.category;
+      out.push(`## ${lastCat}`, '');
+    }
+    out.push(`### ${++n}. ${caseId}${turn > 1 ? ` (turn ${turn})` : ''}`, '', '**Question**', '', '```', String(first.user), '```', '');
+    for (const m of order) {
+      const r = here.find((x) => x.model === m);
+      if (!r) continue;
+      const mark = r.error ? '⚠️' : r.scored ? (r.pass ? '✅' : '❌') : '·';
+      out.push(`**${m}** ${mark} ${r.latencyMs ? sec(r.latencyMs) : ''}${r.intent ? ` · intent \`${r.intent}\`` : ''}`, '');
+      out.push(r.error ? `ERROR: ${r.error}` : '```', ...(r.error ? [] : [String(r.reply).trim() || '(empty)', '```']));
+      if (r.scored && !r.pass && r.failures?.length) out.push('', `> check failed: ${r.failures.join('; ')}`);
+      out.push('');
+    }
+  }
+  return `${out.join('\n')}\n`;
+}
