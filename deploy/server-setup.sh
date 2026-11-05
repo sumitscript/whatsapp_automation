@@ -20,6 +20,16 @@ mkdir -p "$APP_DIR/deploy" "$APP_DIR/knowledge_base" "$APP_DIR/backups"
 chown -R "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR"
 chown -R 1000:1000 "$APP_DIR/knowledge_base" # container user "node"
 
+# Make the root/deploy mix-up harmless: new files inherit the deploy group (setgid) and, with ACLs,
+# stay writable by the deploy user even when root creates them. (CI also heals ownership on every run.)
+chmod g+rwXs "$APP_DIR" "$APP_DIR/deploy" "$APP_DIR/backups"
+if ! command -v setfacl >/dev/null; then apt-get install -y acl >/dev/null 2>&1 || true; fi
+if command -v setfacl >/dev/null; then
+  setfacl -R -m "u:$DEPLOY_USER:rwX" "$APP_DIR" 2>/dev/null || true
+  setfacl -R -d -m "u:$DEPLOY_USER:rwX" "$APP_DIR" 2>/dev/null || true
+fi
+# Root shells should work as the deploy user here: use `sudo -iu $DEPLOY_USER` instead of copying files as root.
+
 if command -v ufw >/dev/null; then
   ufw allow OpenSSH
   ufw allow 80/tcp

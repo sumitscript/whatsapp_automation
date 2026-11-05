@@ -89,6 +89,33 @@ jobs:
           echo "→ TCP check ${SSH_HOST}:${SSH_PORT:-22}"
           if timeout 10 bash -c "exec 3<>/dev/tcp/${SSH_HOST}/${SSH_PORT:-22}"; then echo "✓ port reachable"; else echo "::error title=SSH unreachable::cannot open ${SSH_HOST}:${SSH_PORT:-22} from GitHub runners (firewall/ufw/wrong port/host down)"; exit 1; fi
 
+      # Permanent fix for "tar: Cannot open: Permission denied": anything created as root on the server
+      # (a manual copy, a manual `sudo bash deploy.sh`) can't be overwritten by the deploy user.
+      # The deploy user is in the docker group, so a throw-away container can hand the files back
+      # without sudo. knowledge_base/ is skipped: it belongs to the container user (uid 1000).
+      - name: Heal file ownership on the server
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          envs: DEPLOY_PATH
+          script_stop: true
+          script: |
+            uid="$(id -u)"; gid="$(id -g)"
+            echo "deploy user: $(whoami) ($uid:$gid), path: $DEPLOY_PATH"
+            if [ "$uid" = 0 ]; then echo "::warning title=SSH_USER is root::deploy as a non-root user (see deploy/server-setup.sh); root-owned files are the cause of recurring permission errors"; exit 0; fi
+            [ -d "$DEPLOY_PATH" ] || { echo "→ $DEPLOY_PATH missing, creating"; mkdir -p "$DEPLOY_PATH" || { echo "✗ cannot create $DEPLOY_PATH: run 'sudo mkdir -p $DEPLOY_PATH && sudo chown $(whoami): $DEPLOY_PATH' once on the server"; exit 1; }; }
+            bad="$(find "$DEPLOY_PATH" -path "$DEPLOY_PATH/knowledge_base" -prune -o ! -user "$uid" -print 2>/dev/null | head -20)"
+            if [ -z "$bad" ]; then echo "✓ all files are owned by $(whoami)"; exit 0; fi
+            echo "! not owned by $(whoami) (first 20):"; echo "$bad"
+            docker run --rm -v "$DEPLOY_PATH:/w" alpine:3.20 sh -c "find /w -path /w/knowledge_base -prune -o ! -user $uid -exec chown $uid:$gid {} +" \
+              || { echo "✗ could not fix ownership. Run once on the server: sudo find $DEPLOY_PATH -path $DEPLOY_PATH/knowledge_base -prune -o -exec chown $(whoami): {} +"; exit 1; }
+            echo "✓ ownership repaired"
+
       - name: Upload compose + proxy config
         uses: appleboy/scp-action@v0.1.7
         with:

@@ -29,6 +29,9 @@ It does the following:
 - installs Docker (via get.docker.com) if it's missing;
 - creates the `deploy` user in the `docker` group, with `~/.ssh/authorized_keys`;
 - creates `/opt/whatsapp-ai/{deploy,knowledge_base,backups}` and gives `knowledge_base` to UID 1000 (the container's `node` user);
+- sets setgid + default ACLs on `/opt/whatsapp-ai`, so files a root shell creates there stay writable by `deploy`;
+
+**Root vs deploy ownership.** CI failing with `tar: …: Cannot open: Permission denied` means something on the server was created as root. Three layers prevent it: the Deploy workflow's *Heal file ownership* step re-owns anything not owned by the deploy user before uploading (using a throw-away `alpine` container, so no sudo is needed); `deploy/deploy.sh` re-runs itself as the directory owner if started as root; and `server-setup.sh` sets ACLs. When working on the server, use `sudo -iu deploy` rather than a root shell. `SSH_USER` must never be `root`.
 - if `ufw` is present, allows only OpenSSH, 80/tcp, 443/tcp and 443/udp, then enables the firewall.
 
 ## 3. Create `/opt/whatsapp-ai/.env`
