@@ -118,6 +118,25 @@ export class OllamaClient {
     return Date.now() - started;
   }
 
+  /**
+   * "Think ahead": read a prompt without answering it. Evaluates the messages and stops after one token, so
+   * Ollama's KV cache already holds that prefix when the real message arrives (the reply then only has to
+   * read the new part). Same options as chat() so the cached prefix is reusable; abortable.
+   * @returns {Promise<{promptTokens:number, promptMs:number, loadMs:number, totalMs:number}>}
+   */
+  async prefill({ model, messages, signal }) {
+    const body = { model, messages, stream: false, keep_alive: this.keepAlive, options: this.buildOptions({ temperature: 0, maxTokens: 1 }) };
+    if (THINKING_FAMILIES.test(model)) body.think = false;
+    const res = await this.#request('/api/chat', { method: 'POST', body, signal, timeoutMs: 120_000 });
+    const ev = await res.json();
+    return {
+      promptTokens: ev.prompt_eval_count ?? 0,
+      promptMs: Math.round((ev.prompt_eval_duration ?? 0) / 1e6),
+      loadMs: Math.round((ev.load_duration ?? 0) / 1e6),
+      totalMs: Math.round((ev.total_duration ?? 0) / 1e6),
+    };
+  }
+
   buildOptions({ temperature, maxTokens, extra = {} } = {}) {
     const options = {
       temperature,

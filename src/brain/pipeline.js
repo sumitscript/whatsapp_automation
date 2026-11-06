@@ -15,6 +15,7 @@ import { clamp, sha1 } from '../core/util.js';
 
 const FALLBACK = "Hmm, I couldn't put a good answer together for that — could you say it another way?";
 const SAFETY_TOKENS = 256;
+const TYPICAL_TURN_TOKENS = 150; // size of the final user turn (facts + rules + message) assumed when pre-reading
 const REFERS_TO_PAST = /\b(remember|recall|last time|earlier|before|previously|already told|i told you|yaad|pichli baar|pichhli baar|pehle|kal|bataya tha|याद|पिछली)\b/i;
 const WANTS_ANSWER =
   /\b(not sure|no idea|don'?t know|dont know|idk|tell me the (correct |right )?answer|give me the (correct |right )?answer|(correct|right) answer|just tell me|solution batao|answer batao|pata nahi|nahi pata|nhi pata|bata do|samjha do)\b/i;
@@ -352,7 +353,26 @@ Return ONLY the updated notes.`,
     return h && (items === null || h.kind === 'appointment') ? withPlace([h]) : [];
   }
 
-  return { respond, summarize, extractAgenda };
+  /**
+   * Think-ahead (predictive prefill). About 85% of every prompt (persona + recent history) is known before the
+   * person writes their next message, and on a CPU reading it is most of the wait (~150 tokens/s). So after a
+   * reply, while they read and type, the worker has the model read that known part; the real message then only
+   * pays for its own few tokens. The prefix is built exactly like respond() builds it (same system text, same
+   * deterministic selectHistory), with a placeholder where the new message will go.
+   * @param {{ chatId?: string, history?: {role:string, content:string}[], settings: object, signal?: AbortSignal }} p
+   */
+  async function warm({ chatId, history, settings, signal }) {
+    const turns = history ?? (chatId ? await memory.get(chatId) : []);
+    const system = `${renderPersona(settings)}\n\nToday's date: ${new Date().toDateString()}.`;
+    const numCtx = llm.numCtx || 4096;
+    const maxTokens = clamp(settings.maxTokens, 48, 1400);
+    const budget = Math.max(0, Math.min(settings.historyTokens ?? 1500, numCtx - estimateTokens(system) - TYPICAL_TURN_TOKENS - maxTokens - SAFETY_TOKENS));
+    const { history: picked } = selectHistory(turns, { maxMessages: settings.historyTurns, maxTokens: budget });
+    const messages = [{ role: 'system', content: system }, ...picked, { role: 'user', content: '…' }];
+    return llm.prefill({ model: settings.model, messages, signal });
+  }
+
+  return { respond, summarize, extractAgenda, warm };
 }
 
 /** In-process stores (tests, playground without Redis). */

@@ -51,6 +51,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   replyInGroups: false,
   humanize: true, // split long answers into several bubbles like a person
   answerCache: true,
+  prefillAhead: true, // after a reply, pre-read persona + history while they type (see brain.warm)
   markSeen: true,
   takeoverSeconds: 30, // pause AI in a chat after the owner replies from the phone (0 = never pause)
   rateLimitPerMin: 12,
@@ -92,6 +93,7 @@ const RULES = {
   replyInGroups: bool,
   humanize: bool,
   answerCache: bool,
+  prefillAhead: bool,
   markSeen: bool,
   takeoverSeconds: (v) => intIn(v, 0, 24 * 3600),
   rateLimitPerMin: (v) => intIn(v, 1, 600),

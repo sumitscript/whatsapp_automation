@@ -92,6 +92,32 @@ const publishStatus = () =>
     .catch(() => {});
 setInterval(publishStatus, 5000).unref();
 
+// ---- Think-ahead: while the person reads our reply and types the next one, the model pre-reads the part of
+// the next prompt we already know (persona + history), so the real message only pays for its own tokens.
+// Strictly lower priority than live work: a new message cancels it on arrival (the model stops mid-read).
+let warmCtl = null;
+function cancelWarm() {
+  warmCtl?.abort();
+  warmCtl = null;
+}
+async function warmChat(chatId) {
+  const s = settings.get();
+  if (!s.prefillAhead || !modelState.ready || inFlight > 0) return;
+  cancelWarm();
+  const ctl = (warmCtl = new AbortController());
+  try {
+    await gate.run(async () => {
+      if (ctl.signal.aborted || inFlight > 0) return;
+      const r = await brain.warm({ chatId, settings: settings.get(), signal: ctl.signal });
+      log.debug('Think-ahead ready', { chatId, promptTokens: r.promptTokens, ms: r.promptMs });
+    });
+  } catch (err) {
+    if (!ctl.signal.aborted) log.warn('Think-ahead failed', { chatId, err });
+  } finally {
+    if (warmCtl === ctl) warmCtl = null;
+  }
+}
+
 async function handleJob(job) {
   const out = (payload) => bus.publish(TOPICS.outbound, job.chatId, { jobId: job.jobId, chatId: job.chatId, ...payload });
   if (Date.now() - job.receivedAt > STALE_JOB_MS) {
@@ -126,6 +152,7 @@ async function handleJob(job) {
     inFlight--;
     lastActivity = Date.now();
   }
+  warmChat(job.chatId).catch(() => {}); // fire and forget: the next message cancels it if it arrives first
   // Conversation outgrew the verbatim window → fold the oldest turns into long-term memory later.
   const turnsNow = await memory.get(job.chatId).catch(() => []);
   if (turnsNow.length > s.historyTurns + 8) scheduleFold(job.chatId, false);
@@ -218,7 +245,13 @@ await bus.subscribe(TOPICS.inbound, 'ai-worker', async (job) => {
   if (job.type === 'summarize') return scheduleFold(job.chatId, true); // session ended
   if (!job.text) return;
   lastActivity = Date.now();
+  cancelWarm(); // a real message beats any think-ahead
   lanes.push(job.chatId, () => gate.run(() => handleJob(job))).catch((err) => log.error('Job failed', { err }));
+});
+// After a restart or model switch, pre-read the persona alone: the one prefix every chat shares.
+modelReady.then(() => warmChat(null)).catch(() => {});
+settings.onChange((next, prev) => {
+  if (next.model !== prev.model) modelReady.then(() => warmChat(null)).catch(() => {});
 });
 publishStatus();
 log.info('Worker ready', { bus: bus.driver, model: settings.get().model, concurrency: config.ollama.concurrency });

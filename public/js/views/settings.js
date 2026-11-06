@@ -39,6 +39,7 @@ export async function mount(root, { hub }) {
             <div class="toggles">
               <label class="switch-row"><input type="checkbox" class="switch" name="humanize" /><span>Human-like pacing<small class="muted"> — typing indicator &amp; split long replies</small></span></label>
               <label class="switch-row"><input type="checkbox" class="switch" name="answerCache" /><span>Answer cache<small class="muted"> — instant replies to repeated factual questions</small></span></label>
+              <label class="switch-row"><input type="checkbox" class="switch" name="prefillAhead" /><span>Think ahead<small class="muted"> — pre-read the prompt while they type, so replies start sooner</small></span></label>
               <label class="switch-row"><input type="checkbox" class="switch" name="replyInGroups" /><span>Reply in groups</span></label>
             </div>
 
@@ -147,7 +148,7 @@ export async function mount(root, { hub }) {
     };
     [
       'replyMode', 'ownerName', 'persona', 'temperature', 'maxTokens', 'historyTurns', 'historyTokens', 'debounceMs',
-      'humanize', 'answerCache', 'replyInGroups', 'memoryEnabled', 'personaName', 'startCommands', 'stopCommands',
+      'humanize', 'answerCache', 'prefillAhead', 'replyInGroups', 'memoryEnabled', 'personaName', 'startCommands', 'stopCommands',
       'welcomeMessage', 'goodbyeMessage', 'sessionIdleMinutes', 'takeoverSeconds',
       'notifyOnTimeout', 'timeoutMessage', 'unsupportedMessage', 'agendaEnabled', 'notifyOwnerOnAgenda', 'alertOwner', 'timezone',
     ].forEach((k) => set(k, st[k]));
@@ -174,6 +175,7 @@ export async function mount(root, { hub }) {
       takeoverSeconds: num('takeoverSeconds'),
       humanize: form.humanize.checked,
       answerCache: form.answerCache.checked,
+      prefillAhead: form.prefillAhead.checked,
       replyInGroups: form.replyInGroups.checked,
       memoryEnabled: form.memoryEnabled.checked,
       personaName: form.personaName.value.trim(),

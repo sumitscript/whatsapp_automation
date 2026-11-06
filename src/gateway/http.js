@@ -370,14 +370,8 @@ export function createApp(deps) {
   });
 
   // ---------- playground (test the bot without WhatsApp) ----------
-  api.post('/playground', async (req, res) => {
-    const message = String(req.body?.message || '').trim().slice(0, 2000);
-    if (!message) throw httpError(400, 'Message required');
-    const history = (Array.isArray(req.body?.history) ? req.body.history : [])
-      .filter((t) => t && ['user', 'assistant'].includes(t.role) && typeof t.content === 'string')
-      .slice(-20)
-      .map((t) => ({ role: t.role, content: t.content.slice(0, 4000) }));
-    // Optional per-request model (must be installed) so models can be compared without changing the live setting.
+  // Optional per-request model (must be installed) so models can be compared without changing the live setting.
+  const playgroundSettings = async (req) => {
     let s = settings.get();
     const wantModel = req.body?.model;
     if (wantModel !== undefined && wantModel !== s.model) {
@@ -386,6 +380,23 @@ export function createApp(deps) {
       if (!installed.some((m) => m.name === wantModel)) throw httpError(400, `Model "${wantModel}" is not installed`);
       s = { ...s, model: wantModel };
     }
+    return s;
+  };
+  const playgroundHistory = (req) =>
+    (Array.isArray(req.body?.history) ? req.body.history : [])
+      .filter((t) => t && ['user', 'assistant'].includes(t.role) && typeof t.content === 'string')
+      .slice(-20)
+      .map((t) => ({ role: t.role, content: t.content.slice(0, 4000) }));
+  // Run the think-ahead step for a history and report what it cost, to measure how much a real pre-read saves.
+  api.post('/playground/warm', async (req, res) => {
+    const stats = await brain.warm({ history: playgroundHistory(req), settings: await playgroundSettings(req) });
+    res.json({ ok: true, ...stats });
+  });
+  api.post('/playground', async (req, res) => {
+    const message = String(req.body?.message || '').trim().slice(0, 2000);
+    if (!message) throw httpError(400, 'Message required');
+    const history = playgroundHistory(req);
+    const s = await playgroundSettings(req);
     const contactName = typeof req.body?.contactName === 'string' ? req.body.contactName.trim().slice(0, 80) || undefined : undefined;
     const longTermMemory = typeof req.body?.longTermMemory === 'string' ? req.body.longTermMemory.slice(0, 1500) || undefined : undefined;
     const bubbles = [];
