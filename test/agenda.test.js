@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  asksAboutPlans, heuristicItem, isMeetingRequest, looksLikeCommitment, parseExtraction, parseWhen, resolveItems, sameItem,
+  asksAboutPlans, guessLocation, heuristicItem, isMeetingRequest, looksLikeCommitment, parseExtraction, parseWhen, resolveItems, sameItem,
   sanitizeAgendaInput, summarizeAgenda, zonedToUtc,
 } from '../src/brain/agenda.js';
 import { createBrain } from '../src/brain/pipeline.js';
@@ -46,6 +46,18 @@ test('text without a date or time yields nothing', () => {
   assert.equal(when('how are you doing'), null);
   assert.equal(when('may I ask something'), null);
   assert.equal(when(''), null);
+});
+
+test('"six in the morning" is 06:00, spotted, and its place is kept (seen in a real chat)', () => {
+  const t = "Let's meet six in the morning at railways station";
+  assert.equal(looksLikeCommitment(t), true);
+  const now = new Date('2026-11-05T18:17:00Z'); // 23:47 IST
+  const w = parseWhen(`tomorrow ${t}`, { now, timeZone: 'Asia/Kolkata' });
+  assert.equal(w.dueAt.toISOString(), '2026-11-06T00:30:00.000Z'); // 06:00 IST
+  assert.equal(guessLocation(t), 'Railways station');
+  assert.equal(guessLocation('Tomorrow at six p m near zudio office, vadonra, gujarat'), 'Zudio office');
+  assert.equal(guessLocation('meet at 6pm'), null);
+  assert.equal(parseWhen('kal 5 in the evening', { now, timeZone: 'Asia/Kolkata' }).dueAt.toISOString(), '2026-11-06T11:30:00.000Z');
 });
 
 test('spots messages that may hold a commitment', () => {

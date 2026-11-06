@@ -8,7 +8,7 @@
 import { INTENT_PROFILES, isFollowUp, resolveIntent } from './intent.js';
 import { replyLanguage, statedLanguagePreference } from './lang.js';
 import { MessageChunker } from './format.js';
-import { asksAboutPlans, buildExtractionMessages, heuristicItem, isMeetingRequest, parseExtraction, resolveItems } from './agenda.js';
+import { asksAboutPlans, buildExtractionMessages, guessLocation, heuristicItem, isMeetingRequest, parseExtraction, resolveItems } from './agenda.js';
 import { estimateTokens, normalize } from '../rag/text.js';
 import { ownerAliasList, renderPersona } from '../core/settings-schema.js';
 import { clamp, sha1 } from '../core/util.js';
@@ -343,10 +343,13 @@ Return ONLY the updated notes.`,
     }
     const userTexts = turns.filter((t) => t.role === 'user').map((t) => t.content);
     const resolved = items ? resolveItems(items, { text, userTexts, now, timeZone }) : [];
-    if (resolved.length) return resolved;
+    // A small model often leaves `location` empty even when the message names a place.
+    const place = guessLocation(`${userTexts.slice(-3, -1).join('. ')}. ${text}`);
+    const withPlace = (list) => list.map((it) => (it.location || !place ? it : { ...it, location: place }));
+    if (resolved.length) return withPlace(resolved);
     // The model failed or found nothing: a plain "let's meet tomorrow at 5" is still worth keeping.
     const h = heuristicItem({ text, contextText: userTexts.slice(-4, -1).join('\n'), contactName, now, timeZone });
-    return h && (items === null || h.kind === 'appointment') ? [h] : [];
+    return h && (items === null || h.kind === 'appointment') ? withPlace([h]) : [];
   }
 
   return { respond, summarize, extractAgenda };

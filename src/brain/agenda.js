@@ -76,8 +76,21 @@ const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven
 export function normalizeTimeText(text) {
   return String(text ?? '')
     .toLowerCase()
-    .replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b(?=\s*(?:o['’]?clock|[ap]\s?\.?\s?m\b|baje|bje))/g, (w) => String(NUMBER_WORDS[w]))
-    .replace(/(\d)\s*([ap])\s?\.?\s?m\b\.?/g, '$1$2m');
+    .replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b(?=\s*(?:o['’]?clock|[ap]\s?\.?\s?m\b|baje|bje|(?:in the |at )?(?:morning|afternoon|evening|night|subah|shaam|raat|dopahar)\b))/g, (w) => String(NUMBER_WORDS[w]))
+    .replace(/(\d)\s*([ap])\s?\.?\s?m\b\.?/g, '$1$2m')
+    // "6 in the morning" / "chhe subah" -> 6am; "5 in the evening" -> 5pm (the hour needs a number in front)
+    .replace(/\b(\d{1,2})(:\d{2})?\s*(?:in the |at )?(?:morning|subah)\b/g, '$1$2am')
+    .replace(/\b(\d{1,2})(:\d{2})?\s*(?:in the |at )?(?:afternoon|evening|night|shaam|raat|dopahar)\b/g, '$1$2pm');
+}
+
+// "at the railway station", "near zudio office, vadodara": a place named in the message, for when the model leaves
+// `location` empty. Only the first place phrase; a time ("at 6") never counts.
+const PLACE = /\b(?:at|near|outside|opposite|in front of|behind|inside)\s+(?:the\s+)?([a-z][^,.;\n!?]{2,50}?)(?=\s+(?:at|by|around|tomorrow|today|tonight|on)\b|[,.;\n!?]|$)/i;
+export function guessLocation(text) {
+  const m = PLACE.exec(normalizeTimeText(text));
+  if (!m) return null;
+  const v = m[1].trim().replace(/\s+/g, ' ');
+  return v.length < 3 ? null : v.charAt(0).toUpperCase() + v.slice(1);
 }
 
 /**
