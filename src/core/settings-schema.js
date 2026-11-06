@@ -44,10 +44,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   model: 'gemma3:4b',
   temperature: 0.7,
   maxTokens: 320,
-  historyTurns: 12, // messages kept verbatim (older ones are folded into long-term memory)
-  historyTokens: 1500, // context-window budget for conversation history
+  historyTurns: 10, // messages kept verbatim (older ones are folded into long-term memory)
+  historyTokens: 1000, // context-window budget for conversation history
   memoryEnabled: true,
-  debounceMs: 900,
+  debounceMs: 700,
   replyInGroups: false,
   humanize: true, // split long answers into several bubbles like a person
   answerCache: true,
