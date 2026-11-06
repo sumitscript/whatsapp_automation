@@ -24,9 +24,6 @@ export function toWhatsApp(text) {
     .trim();
 }
 
-// Emoji-only run at the start of the remaining text (with the line break before it).
-const EMOJI_LEAD = /^\s*(?:[\p{Extended_Pictographic}️‍]\s*)+(?=\n|$)/u;
-
 export class MessageChunker {
   /**
    * @param {{ minChars?: number, maxChars?: number, split?: boolean }} opts
@@ -68,18 +65,7 @@ export class MessageChunker {
     return piece ? [piece] : [];
   }
 
-  // Never split off a bubble that would be only an emoji ("😊" on its own looks like a glitch):
-  // wait until real text follows the cut, and keep a leading emoji with the bubble before it.
   #findCut() {
-    const cut = this.#rawCut();
-    if (cut < 0) return cut;
-    const rest = this.buf.slice(cut);
-    if (!/[\p{L}\p{N}]/u.test(rest)) return -1;
-    const lead = rest.match(EMOJI_LEAD);
-    return lead ? cut + lead[0].length : cut;
-  }
-
-  #rawCut() {
     const b = this.buf;
     // Outside a code fence only: count fences before each candidate cut.
     const fenceOpenAt = (i) => (b.slice(0, i).match(/```/g) || []).length % 2 === 1;
