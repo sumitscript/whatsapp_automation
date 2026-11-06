@@ -84,3 +84,12 @@ test('prefillAhead is a validated boolean setting, on by default', () => {
   assert.deepEqual(sanitizeSettings({ prefillAhead: false }).value, { prefillAhead: false });
   assert.equal(sanitizeSettings({ prefillAhead: 'maybe' }).errors.length, 1);
 });
+
+import { OllamaClient } from '../src/llm/ollama.js';
+
+test('think-ahead is skipped for gemma3 (sliding-window cache cannot be reused) and kept for the rest', () => {
+  const c = new OllamaClient({ url: 'http://127.0.0.1:1' });
+  assert.equal(c.reusesPrefix('gemma3:4b'), false);
+  assert.equal(c.reusesPrefix('gemma3:12b'), false);
+  for (const m of ['llama3.2:3b', 'openchat:latest', 'qwen2.5:3b', 'qwen3:8b']) assert.equal(c.reusesPrefix(m), true, m);
+});

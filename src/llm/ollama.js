@@ -119,6 +119,15 @@ export class OllamaClient {
   }
 
   /**
+   * Can this model reuse a cached prompt prefix? Measured on the live server: llama/qwen-style models read the
+   * persona + history once and the next message only pays for its own tokens (~25-30% less prompt time), but
+   * gemma3 (sliding-window attention) cannot rewind its cache, so a pre-read changes nothing (6.2 s vs 6.4 s).
+   */
+  reusesPrefix(model) {
+    return !/^gemma3/i.test(String(model || ''));
+  }
+
+  /**
    * "Think ahead": read a prompt without answering it. Evaluates the messages and stops after one token, so
    * Ollama's KV cache already holds that prefix when the real message arrives (the reply then only has to
    * read the new part). Same options as chat() so the cached prefix is reusable; abortable.

@@ -102,7 +102,7 @@ function cancelWarm() {
 }
 async function warmChat(chatId) {
   const s = settings.get();
-  if (!s.prefillAhead || !modelState.ready || inFlight > 0) return;
+  if (!s.prefillAhead || !modelState.ready || inFlight > 0 || !llm.reusesPrefix(s.model)) return;
   cancelWarm();
   const ctl = (warmCtl = new AbortController());
   try {
