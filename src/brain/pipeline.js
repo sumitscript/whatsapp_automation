@@ -8,7 +8,7 @@
 import { INTENT_PROFILES, isFollowUp, resolveIntent } from './intent.js';
 import { replyLanguage, statedLanguagePreference } from './lang.js';
 import { MessageChunker } from './format.js';
-import { buildExtractionMessages, heuristicItem, isMeetingRequest, parseExtraction, resolveItems } from './agenda.js';
+import { asksAboutPlans, buildExtractionMessages, heuristicItem, isMeetingRequest, parseExtraction, resolveItems } from './agenda.js';
 import { estimateTokens, normalize } from '../rag/text.js';
 import { ownerAliasList, renderPersona } from '../core/settings-schema.js';
 import { clamp, sha1 } from '../core/util.js';
@@ -133,6 +133,7 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     if (wantsAnswer) rules.push('They want the answer: give it directly and correctly first; if their idea was wrong, correct it kindly.');
     if (askedQuestionLast) rules.push("What I said last already asked a question: don't end this one with a question.");
     if (isMeetingRequest(text)) rules.push(`This asks ${owner} for a meeting, call or favour. Don't agree, refuse or promise anything for me: say I'll pass it on and the real ${owner} will confirm.`);
+    if (asksAboutPlans(text)) rules.push(`They ask what I'm doing or if I'm free. I don't know my real plans or schedule: never invent an activity. Say I'm not sure and that I can ask the real ${owner}.`);
     if (wantsAnother) rules.push(`They want another one: give a NEW ${intent === 'joke' ? 'joke' : 'one'}, different from everything I already said in this chat. Never repeat or reword an earlier one.`);
     if (intent === 'math') rules.push('Give the result in plain text (like "2 + 2 = 4"), not in a code block.');
     if (wordTarget) rules.push(`They asked for about ${wordTarget} words: write at least that much.`);

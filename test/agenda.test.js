@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  heuristicItem, isMeetingRequest, looksLikeCommitment, parseExtraction, parseWhen, resolveItems, sameItem,
+  asksAboutPlans, heuristicItem, isMeetingRequest, looksLikeCommitment, parseExtraction, parseWhen, resolveItems, sameItem,
   sanitizeAgendaInput, summarizeAgenda, zonedToUtc,
 } from '../src/brain/agenda.js';
 import { createBrain } from '../src/brain/pipeline.js';
@@ -57,6 +57,8 @@ test('spots messages that may hold a commitment', () => {
   }
   assert.equal(isMeetingRequest("let's meet tomorrow"), true);
   assert.equal(isMeetingRequest('what is 2+2'), false);
+  for (const q of ['What are you doing tomorrow', 'what r u doing', "what's your plan for sunday", 'are you free tonight', 'aaj kya kar rahe ho', 'plans for tomorrow?']) assert.equal(asksAboutPlans(q), true, q);
+  for (const q of ['what is closure in js', 'Hello', 'what are you building', 'tell me a joke', 'what do you do']) assert.equal(asksAboutPlans(q), false, q);
 });
 
 test('parses the model JSON, even inside a code fence', () => {

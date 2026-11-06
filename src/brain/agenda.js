@@ -231,6 +231,13 @@ export function looksLikeCommitmentInContext(text, previousUserTexts = []) {
 // A task on pasted text ("summarize this: the meeting moved to Friday") mentions meetings but asks for none.
 const TEXT_TASK = /\b(summari[sz]e|summary|translate|explain|rewrite|proofread|what(?:'|’)?s on my)\b/i;
 const DIRECT_ASK = /\b(call|ping|meet|text|message|ring) me|please confirm|pls confirm|confirm (it|this|that|the)\b|can you confirm/i;
+// "What are you doing tomorrow?", "are you free tonight", "aaj kya kar rahe ho": the twin has no real
+// schedule, so a small model makes one up ("wrapping up some coding challenges"). Pinned by a rule in the prompt.
+const PLANS_Q = /\bwhat(?:'|’)?s?\s+(?:(?:are|r)\s+)?(?:you|u)\s+(?:doing|up\s+to)\b|\bwhat(?:'|’)?s\s+(?:your|ur)\s+(?:plan|plans|schedule)\b|\bwhat\s+(?:are\s+)?(?:your|ur)\s+plans\b|\b(?:are|r)\s+(?:you|u)\s+(?:free|busy|available)\b|\b(?:kya|kaha|kahan)\s+(?:kar\s+rah[ae]|ho|hai)\b|\bplans?\s+(?:for|on)\s+(?:today|tonight|tomorrow|weekend|sunday|saturday)\b/i;
+export function asksAboutPlans(text) {
+  return PLANS_Q.test(String(text || ''));
+}
+
 export function isMeetingRequest(text) {
   const s = String(text ?? '');
   if (TEXT_TASK.test(s)) return false;
