@@ -82,7 +82,7 @@ services:
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
       OLLAMA_KEEP_ALIVE: '-1' # model stays in RAM → no cold starts
-      OLLAMA_NUM_PARALLEL: ${LLM_CONCURRENCY:-2}
+      OLLAMA_NUM_PARALLEL: ${LLM_CONCURRENCY:-1}
       OLLAMA_MAX_LOADED_MODELS: '1'
       OLLAMA_FLASH_ATTENTION: '1'
       OLLAMA_KV_CACHE_TYPE: q8_0 # half the KV-cache RAM, negligible quality loss

@@ -38,3 +38,26 @@ test('split=false yields a single bubble', () => {
   assert.deepEqual(c.push('one\n\ntwo'), []);
   assert.deepEqual(c.flush(), ['one\n\ntwo']);
 });
+
+const longLine = 'Okay, here you go, this first sentence is comfortably longer than sixty characters.';
+
+test('a trailing emoji never becomes its own bubble', () => {
+  const c = new MessageChunker();
+  const out = [...c.push(`${longLine}\n\n`), ...c.push('😊'), ...c.flush()];
+  assert.equal(out.length, 1);
+  assert.ok(out[0].endsWith('😊'));
+});
+
+test('an emoji that follows a paragraph break stays with the bubble before it', () => {
+  const c = new MessageChunker();
+  const out = [...c.push(`${longLine}\n\n😂 \n\nHow is your day going so far?`), ...c.flush()];
+  assert.equal(out.length, 2);
+  assert.ok(out[0].endsWith('😂'), out[0]);
+  assert.equal(out[1], 'How is your day going so far?');
+});
+
+test('normal paragraphs still split into bubbles', () => {
+  const c = new MessageChunker();
+  const out = [...c.push(`${longLine}\n\nA second paragraph with real words in it.`), ...c.flush()];
+  assert.equal(out.length, 2);
+});

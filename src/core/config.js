@@ -77,7 +77,7 @@ export const config = Object.freeze({
     numThread: int(env.LLM_NUM_THREAD, 0), // 0 = let Ollama decide
     keepAlive: str(env.LLM_KEEP_ALIVE, '-1'), // keep the model resident in RAM
     autoPull: bool(env.LLM_AUTO_PULL, true),
-    concurrency: int(env.LLM_CONCURRENCY, 2), // match OLLAMA_NUM_PARALLEL
+    concurrency: int(env.LLM_CONCURRENCY, 1), // match OLLAMA_NUM_PARALLEL; 1 on a CPU box: parallel generations just slow each other down
     requestTimeoutMs: int(env.LLM_TIMEOUT_MS, 120_000),
   }),
 

@@ -11,7 +11,7 @@ This page lists what the stack uses on the target KVM (8 vCPU / 32 GB RAM, CPU o
 | `caddy` | `caddy:2.10-alpine` | 256 MB | shared | **80, 443/tcp, 443/udp (public)** | TLS, compression, reverse proxy to `gateway:3000` |
 | `gateway` | app image | 2 GB | shared | 3000 (internal) | Node and Chromium (whatsapp-web.js). `shm_size: 1gb` |
 | `worker` | app image | 768 MB | shared | 3001 (internal, `/healthz`) | Node only. The heavy work happens in Ollama |
-| `ollama` | `ollama/ollama:${OLLAMA_VERSION:-0.40.14}` | 20 GB | most of the CPU while generating | 11434 (internal) | `KEEP_ALIVE=-1`, `NUM_PARALLEL=${LLM_CONCURRENCY:-2}`, `MAX_LOADED_MODELS=1`, flash attention, `q8_0` KV cache |
+| `ollama` | `ollama/ollama:${OLLAMA_VERSION:-0.40.14}` | 20 GB | most of the CPU while generating | 11434 (internal) | `KEEP_ALIVE=-1`, `NUM_PARALLEL=${LLM_CONCURRENCY:-1}`, `MAX_LOADED_MODELS=1`, flash attention, `q8_0` KV cache |
 | `postgres` | `postgres:17-alpine` | 1 GB | shared | 5432 (internal) | `shared_buffers=256MB`, `max_connections=50` |
 | `redis` | `redis:7.4-alpine` | 768 MB | shared | 6379 (internal) | AOF, `maxmemory 512mb`, `volatile-lru` |
 | `kafka` | `apache/kafka:3.9.1` | 1 GB | shared | 9092/9093 (internal) | Profile `kafka`, KRaft single node, heap 256–512 MB, 72 h retention |
@@ -30,7 +30,7 @@ Ollama's 20 GB limit fits any model in the catalog plus its KV cache. Only one m
 
 ## CPU
 
-- **Generation is CPU-bound in Ollama.** `LLM_NUM_THREAD` (0 = auto; 8 suggested on 8 vCPU) and `LLM_CONCURRENCY` (default 2, the same as `OLLAMA_NUM_PARALLEL`) set the trade-off: two parallel replies share the cores, so each one is slower.
+- **Generation is CPU-bound in Ollama.** `LLM_NUM_THREAD` (0 = auto; 8 suggested on 8 vCPU) and `LLM_CONCURRENCY` (default 1, the same as `OLLAMA_NUM_PARALLEL`) set the trade-off: two parallel replies share the cores, so each one is slower.
 - **The other services are light:**
   - Retrieval takes 0.2–1.1 ms per query (measured on the bundled KB).
   - Intent and language detection are regex.

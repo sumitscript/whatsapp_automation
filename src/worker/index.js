@@ -71,6 +71,11 @@ const bus = await createBus({ logger: log, redisFactory: createRedis });
 const lanes = new KeyedQueue(); // one lane per chat → replies stay in order
 const gate = new Semaphore(config.ollama.concurrency); // bounded parallel generations
 let inFlight = 0;
+// Background work (agenda extraction, memory folds) waits for a quiet period after the last message or
+// reply: people send bursts, and a background generation started in a gap would split the CPU with the
+// next live reply (measured: 3x slower generation while two run at once).
+const BG_QUIET_MS = Number(process.env.WORKER_BG_QUIET_MS || 8000);
+let lastActivity = Date.now();
 let lastReply = null;
 let lastError = null;
 
@@ -119,6 +124,7 @@ async function handleJob(job) {
     await out({ type: 'error', error: err.message });
   } finally {
     inFlight--;
+    lastActivity = Date.now();
   }
   // Conversation outgrew the verbatim window → fold the oldest turns into long-term memory later.
   const turnsNow = await memory.get(job.chatId).catch(() => []);
@@ -181,6 +187,7 @@ async function fold(chatId, { all }) {
 }
 setInterval(async () => {
   if (folding || inFlight > 0 || (!foldQueue.size && !agendaQueue.size)) return;
+  if (Date.now() - lastActivity < BG_QUIET_MS) return; // someone is mid-conversation: stay out of the way
   folding = true;
   try {
     if (agendaQueue.size) {
@@ -210,6 +217,7 @@ await bus.subscribe(TOPICS.inbound, 'ai-worker', async (job) => {
   if (!job?.chatId) return;
   if (job.type === 'summarize') return scheduleFold(job.chatId, true); // session ended
   if (!job.text) return;
+  lastActivity = Date.now();
   lanes.push(job.chatId, () => gate.run(() => handleJob(job))).catch((err) => log.error('Job failed', { err }));
 });
 publishStatus();

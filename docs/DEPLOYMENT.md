@@ -68,7 +68,7 @@ Moving an existing server from Kafka to Redis: edit `.env` on the server (`BUS_D
 **Tuning (optional):**
 - `LLM_MODEL` (default `gemma3:4b`)
 - `LLM_NUM_THREAD=8` on an 8 vCPU KVM
-- `LLM_CONCURRENCY` (default 2)
+- `LLM_CONCURRENCY` (default 1: on CPU, two parallel generations each run ~3x slower, so a second user waits instead)
 - `LLM_NUM_CTX` (default 4096)
 - `KB_*` retrieval thresholds
 - `LOG_LEVEL`
