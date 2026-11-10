@@ -15,6 +15,9 @@ export const keys = Object.freeze({
   workerStatus: `${P}worker:status`,
 });
 
+/** Globs for everything stored per chat (wiped when the WhatsApp account is logged out with "delete data"). */
+export const chatKeyPatterns = Object.freeze([`${P}ctx:*`, `${P}takeover:*`, `${P}rl:*`]);
+
 export const channels = Object.freeze({
   logs: `${P}ch:logs`,
   settings: `${P}ch:settings`,

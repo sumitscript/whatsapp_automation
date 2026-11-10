@@ -119,6 +119,21 @@ export class Semaphore {
   }
 }
 
+/**
+ * Delete every Redis key matching a glob (SCAN + UNLINK in batches, never KEYS, so it is safe on a live server).
+ * `redis` is an ioredis-like client (scanStream, unlink). Returns how many keys were removed.
+ */
+export async function deleteKeysMatching(redis, pattern, { batch = 200 } = {}) {
+  let removed = 0;
+  const stream = redis.scanStream({ match: pattern, count: batch });
+  for await (const keys of stream) {
+    if (!keys.length) continue;
+    await redis.unlink(...keys);
+    removed += keys.length;
+  }
+  return removed;
+}
+
 /** Runs tasks serially per key (one chat = one lane) while different keys run in parallel. */
 export class KeyedQueue {
   constructor() {

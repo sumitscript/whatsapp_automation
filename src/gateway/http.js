@@ -102,7 +102,14 @@ export function createApp(deps) {
       audit(req, `wa.${action}`);
       log.info(`WhatsApp ${action} requested`, { by: req.user.username });
       const status = await wa[action]();
-      res.json({ ok: true, state: status.state });
+      // Logging out unlinks the phone and deletes the WhatsApp session, but the chats, messages, AI memory and
+      // agenda live in this server's own databases and stay unless the caller asks for them to go (wipeData: true).
+      let wiped = null;
+      if (action === 'logout' && req.body?.wipeData === true) {
+        wiped = await inbox.wipeChatData();
+        audit(req, 'data.wipe', wiped);
+      }
+      res.json({ ok: true, state: status.state, wiped });
     });
   }
 

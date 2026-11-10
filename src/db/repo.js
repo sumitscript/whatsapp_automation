@@ -343,6 +343,15 @@ export function createRepo(pool) {
       return (await q('DELETE FROM agenda_items WHERE id = $1', [id])).rowCount > 0;
     },
 
+    // ---------- wipe ----------
+    /** Delete every chat: contacts (with their AI memory notes and block flags), messages, sessions and agenda items. Keeps users, settings and the audit log. */
+    async wipeChatData() {
+      const counts = {};
+      for (const t of ['messages', 'sessions', 'agenda_items', 'contacts']) counts[t] = Number((await q(`SELECT count(*) AS n FROM ${t}`)).rows[0].n);
+      await q('TRUNCATE agenda_items, messages, sessions, contacts RESTART IDENTITY');
+      return counts;
+    },
+
     // ---------- audit + stats ----------
     async audit(username, action, details = null) {
       await q('INSERT INTO audit_log (username, action, details) VALUES ($1, $2, $3)', [username, action, details ? JSON.stringify(details) : null]);

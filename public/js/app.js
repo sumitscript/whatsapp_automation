@@ -174,6 +174,11 @@ hub.on('wa:status', (s) => {
   state.wa = { ...state.wa, ...s };
   renderWaIndicators();
 });
+// The server deleted every chat ("Log out and delete data"): re-draw the open view so no stale chats stay on screen.
+hub.on('chats:wiped', () => {
+  toast('All chats and AI memory were deleted from the server', 'success');
+  route();
+});
 hub.on('socket:state', (s) => {
   state.socket = s;
 });

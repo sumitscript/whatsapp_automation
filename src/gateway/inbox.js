@@ -7,8 +7,8 @@
 // Outbound: bubbles stream back from the worker and are sent in order with
 //           "typing…" kept alive; bubbles for a session that ended meanwhile
 //           are dropped.
-import { keys, withinRate } from '../core/redis.js';
-import { KeyedQueue, normalizePhone, phoneFromWid, sleep, uid } from '../core/util.js';
+import { chatKeyPatterns, keys, withinRate } from '../core/redis.js';
+import { deleteKeysMatching, KeyedQueue, normalizePhone, phoneFromWid, sleep, uid } from '../core/util.js';
 import { renderTemplate } from '../core/settings-schema.js';
 import { helpText, parseCommand } from '../brain/commands.js';
 import { TOPICS } from '../bus/index.js';
@@ -214,6 +214,24 @@ export class Inbox {
     }
     await this.#sendSystem(item.chatId, text, 'agenda');
     return true;
+  }
+
+  /**
+   * "Log out and delete data": forget every chat this server holds. Postgres (contacts + AI memory notes,
+   * messages, sessions, agenda), the Redis short-term memory / takeover / rate keys, and this process's
+   * in-memory per-chat state. Users, settings, the audit log and the knowledge base are kept.
+   */
+  async wipeChatData() {
+    for (const buf of this.pending.values()) clearTimeout(buf.timer);
+    for (const chatId of [...this.typing.keys()]) this.#typingStop(chatId, true);
+    for (const m of [this.pending, this.recentOut, this.jobs, this.echo, this.lastErrorNotice, this.lastUnsupported]) m.clear();
+    this.sessions.reset();
+    const counts = await this.repo.wipeChatData();
+    let redisKeys = 0;
+    for (const pattern of chatKeyPatterns) redisKeys += await deleteKeysMatching(this.redis, pattern);
+    this.hub.emit('chats:wiped', {});
+    this.log.warn('All chat data wiped', { ...counts, redisKeys });
+    return { ...counts, redisKeys };
   }
 
   /** Draw the invitation card for an agenda item (PNG). */

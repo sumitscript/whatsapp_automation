@@ -108,3 +108,22 @@ test('ollama: a stalled stream still times out', async () => {
     server.close();
   }
 });
+
+import { deleteKeysMatching } from '../src/core/util.js';
+
+test('deleteKeysMatching: scans in batches, unlinks what matches, returns the count', async () => {
+  const store = new Set(['p:ctx:a', 'p:ctx:b', 'p:ctx:c', 'p:keep:x']);
+  const unlinked = [];
+  const redis = {
+    scanStream({ match }) {
+      const re = new RegExp(`^${match.replace('*', '.*')}$`);
+      const hits = [...store].filter((k) => re.test(k));
+      return (async function* () { yield hits.slice(0, 2); yield []; yield hits.slice(2); })();
+    },
+    async unlink(...ks) { unlinked.push(...ks); ks.forEach((k) => store.delete(k)); },
+  };
+  assert.equal(await deleteKeysMatching(redis, 'p:ctx:*'), 3);
+  assert.deepEqual(unlinked.sort(), ['p:ctx:a', 'p:ctx:b', 'p:ctx:c']);
+  assert.deepEqual([...store], ['p:keep:x'], 'unrelated keys are untouched');
+  assert.equal(await deleteKeysMatching(redis, 'p:none:*'), 0);
+});

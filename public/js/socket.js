@@ -1,7 +1,7 @@
 // Socket.IO connection that re-broadcasts server events on an app-wide hub.
 // The Socket.IO client (global `io`) is loaded lazily after sign-in, so the login page stays light.
 
-const EVENTS = ['wa:status', 'message:new', 'chat:update', 'typing', 'log', 'model:pull', 'agenda:update', 'llm:status'];
+const EVENTS = ['wa:status', 'message:new', 'chat:update', 'typing', 'log', 'model:pull', 'agenda:update', 'llm:status', 'chats:wiped'];
 
 let socket = null;
 

@@ -87,4 +87,9 @@ export class SessionManager extends EventEmitter {
   stop() {
     clearInterval(this.sweeper);
   }
+
+  /** Forget every cached session (the table was wiped). */
+  reset() {
+    this.cache.clear();
+  }
 }

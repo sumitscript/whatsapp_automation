@@ -65,7 +65,7 @@ export const api = {
 
   // whatsapp
   waStatus: () => request('GET', '/api/wa/status'),
-  waAction: (action) => request('POST', `/api/wa/${action}`, {}),
+  waAction: (action, body = {}) => request('POST', `/api/wa/${action}`, body),
 
   // chats
   chats: (search = '', limit = 100) => request('GET', `/api/chats${qs({ search, limit })}`),

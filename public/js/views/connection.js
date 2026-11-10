@@ -63,7 +63,7 @@ export async function mount(root, { hub, state }) {
               <button class="btn btn-ghost" data-act="restart" ${raw(can.restart && !busy ? '' : 'disabled')}>${raw(icons.refresh)} Restart</button>
               <button class="btn btn-danger" data-act="logout" ${raw(can.logout && !busy ? '' : 'disabled')}>${raw(icons.logout)} Log out</button>
             </div>
-            <p class="muted small">Disconnect keeps the saved session so you can reconnect without scanning. Log out unlinks the device and deletes the session.</p>
+            <p class="muted small">Disconnect keeps the saved session so you can reconnect without scanning. Log out unlinks the device and deletes the session; you can also delete the chats, messages and AI memory stored on this server.</p>
           </div>
           <div class="conn-visual">
             ${raw(
@@ -87,19 +87,22 @@ export async function mount(root, { hub, state }) {
     const btn = e.target.closest('button[data-act]');
     if (!btn || btn.disabled) return;
     const act = btn.dataset.act;
+    let body = {};
     if (act === 'logout') {
-      const ok = await confirmDialog({
+      const { ok, checked } = await confirmDialog({
         title: 'Log out of WhatsApp?',
-        message: 'This unlinks the server from your phone and wipes the saved session. You will need to scan a new QR code.',
+        message: 'This unlinks the server from your phone and wipes the saved WhatsApp session. You will need to scan a new QR code. Chats, messages and the AI’s memory of people are stored on this server and stay unless you also delete them below.',
         confirmText: 'Log out',
         danger: true,
+        option: { label: 'Also delete all chats, messages, agenda and AI memory from this server (cannot be undone)', checked: true },
       });
       if (!ok) return;
+      body = { wipeData: checked };
     }
     busy = act;
     render(state.wa);
     try {
-      const r = await api.waAction(act);
+      const r = await api.waAction(act, body);
       if (r?.state) hub.emit('wa:status', { ...state.wa, state: r.state });
     } catch (ex) {
       toast(`${act} failed: ${ex.message}`, 'error');

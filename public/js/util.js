@@ -195,7 +195,11 @@ export function toast(message, type = 'info', ms = 3200) {
 }
 
 /** Promise-based confirm dialog using <dialog>. */
-export function confirmDialog({ title, message, confirmText = 'Confirm', danger = false }) {
+/**
+ * Modal confirm. Resolves true/false. With `option: { label, checked }` it shows a checkbox and resolves
+ * `{ ok, checked }` instead (the checkbox state is read when the dialog closes).
+ */
+export function confirmDialog({ title, message, confirmText = 'Confirm', danger = false, option = null }) {
   return new Promise((resolve) => {
     const dlg = document.createElement('dialog');
     dlg.className = 'dialog';
@@ -203,6 +207,7 @@ export function confirmDialog({ title, message, confirmText = 'Confirm', danger 
       <form method="dialog">
         <h3>${title}</h3>
         <p>${message}</p>
+        ${raw(option ? html`<label class="switch-row"><input type="checkbox" class="switch" id="dlg-option" ${raw(option.checked ? 'checked' : '')} aria-label="${option.label}" /><span>${option.label}</span></label>` : '')}
         <div class="dialog-actions">
           <button value="cancel" class="btn btn-ghost">Cancel</button>
           <button value="ok" class="btn ${raw(danger ? 'btn-danger' : 'btn-primary')}">${confirmText}</button>
@@ -210,7 +215,8 @@ export function confirmDialog({ title, message, confirmText = 'Confirm', danger 
       </form>`;
     document.body.appendChild(dlg);
     dlg.addEventListener('close', () => {
-      resolve(dlg.returnValue === 'ok');
+      const ok = dlg.returnValue === 'ok';
+      resolve(option ? { ok, checked: !!dlg.querySelector('#dlg-option')?.checked } : ok);
       dlg.remove();
     });
     dlg.showModal();
