@@ -161,14 +161,15 @@ export async function mount(root, { hub }) {
   function actionsFor(item) {
     const a = [];
     const id = item.id;
-    if (item.kind === 'appointment' && item.status === 'pending') {
+    if (item.status === 'pending') {
       a.push(actionBtn('confirm', id, 'Confirm', 'btn-primary', icons.check));
       a.push(actionBtn('decline', id, 'Decline', 'btn-danger', icons.x));
-    } else if (item.status === 'confirmed' || (item.kind === 'todo' && item.status === 'pending')) {
+      if (item.kind === 'todo') a.push(actionBtn('done', id, 'Mark done', 'btn-ghost', icons.check));
+    } else if (item.status === 'confirmed') {
       a.push(actionBtn('done', id, 'Mark done', 'btn-primary', icons.check));
     }
     if (item.status === 'done' || item.status === 'declined') a.push(actionBtn('reopen', id, 'Reopen', 'btn-ghost', icons.refresh));
-    if (item.kind === 'appointment' && item.dueAt) {
+    {
       a.push(html`<a class="btn btn-sm btn-ghost" href="/api/agenda/${id}/card.png" target="_blank" rel="noopener" aria-label="Preview invitation card"><span>Preview card</span></a>`);
       if (item.status === 'confirmed' && item.chatId) a.push(actionBtn('card', id, 'Send invitation', 'btn-ghost'));
     }
@@ -196,6 +197,7 @@ export async function mount(root, { hub }) {
         <div class="agenda-ico" aria-hidden="true">${raw(item.kind === 'todo' ? icons.checklist : icons.agenda)}</div>
         <div class="agenda-body">
           <div class="agenda-title-row">
+            <span class="badge agenda-num" title="Reply “ok ${item.id}” on your own WhatsApp to confirm">#${item.id}</span>
             <h3 class="agenda-title">${item.title}</h3>
             ${raw(statusBadge(item))}
             <span class="badge agenda-src">${item.source === 'ai' ? 'AI' : 'Manual'}</span>
@@ -402,7 +404,7 @@ export async function mount(root, { hub }) {
       let res = null;
       await mutate(item.id, async () => { res = await api.agendaUpdate(item.id, { status: 'confirmed', notify }); }, 'Confirmed');
       if (notify && res) {
-        if (res.notified) toast(item.kind === 'appointment' ? 'Contact notified with an invitation card' : 'Contact notified', 'success');
+        if (res.notified) toast(res.card ? 'Contact notified with an invitation card' : 'Contact notified (the card could not be sent, so the text went alone)', res.card ? 'success' : 'info');
         else if (item.chatId) toast('Confirmed, but the contact could not be messaged (is WhatsApp connected?)', 'error');
       }
       return;

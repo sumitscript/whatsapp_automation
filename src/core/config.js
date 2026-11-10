@@ -85,7 +85,7 @@ export const config = Object.freeze({
   groq: Object.freeze({
     keys: str(env.GROQ_API_KEYS || env.GROQ_API_KEY, ''), // comma/space/newline separated; more keys can be added in the console
     baseUrl: str(env.GROQ_BASE_URL, 'https://api.groq.com/openai/v1').replace(/\/+$/, ''),
-    concurrency: int(env.GROQ_CONCURRENCY, 8), // parallel Groq calls (the hosted model is not CPU-bound like the local one)
+    concurrency: int(env.GROQ_CONCURRENCY, 32), // parallel Groq calls (the hosted model is not CPU-bound like the local one); each key's own rate limit is what really caps it
     timeoutMs: int(env.GROQ_TIMEOUT_MS, 30_000), // "no data for N ms"
   }),
 

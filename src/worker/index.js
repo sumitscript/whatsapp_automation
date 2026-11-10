@@ -245,9 +245,10 @@ async function extractAgendaFor(chatId, { text, contactName }, signal) {
     const same = existing.find((e) => sameItem(e, draft));
     if (same) {
       // The person is refining an earlier proposal ("make it 6pm"): keep the item, update what changed.
+      const changed = (draft.dueAt && (!same.dueAt || new Date(draft.dueAt).getTime() !== new Date(same.dueAt).getTime())) || (draft.location && draft.location !== same.location) || (draft.title && draft.title !== same.title);
       const saved = await repo.updateAgendaItem(same.id, { title: draft.title, details: draft.details ?? same.details, dueAt: draft.dueAt ?? same.dueAt, allDay: draft.dueAt ? draft.allDay : same.allDay, dueText: draft.dueText ?? same.dueText, location: draft.location ?? same.location });
       log.info('Agenda item updated', { chatId, id: same.id });
-      await bus.publish(TOPICS.outbound, chatId, { type: 'agenda', chatId, itemId: saved.id, created: false });
+      await bus.publish(TOPICS.outbound, chatId, { type: 'agenda', chatId, itemId: saved.id, created: false, changed: !!changed });
     } else {
       const saved = await repo.createAgendaItem(draft);
       log.info('Agenda item created', { chatId, id: saved.id, kind: saved.kind, dueAt: saved.dueAt });

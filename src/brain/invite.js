@@ -138,6 +138,15 @@ const CARD_LABELS = {
   gu: { invitation: 'આમંત્રણ', confirmed: 'પાક્કું', pending: 'વિનંતી', when: 'ક્યારે', where: 'ક્યાં', who: 'કોની સાથે', host: 'યજમાન', allDay: 'આખો દિવસ', footer: '{persona} તરફથી, {owner} નો AI ટ્વિન' },
 };
 
+// A to-do/request card reads "TASK" and "Handled by" instead of "INVITATION" and "Hosted by".
+const TASK_LABELS = {
+  en: { task: 'TASK', handler: 'Handled by' },
+  hl: { task: 'TASK', handler: 'Kaun karega' },
+  hi: { task: 'कार्य', handler: 'ज़िम्मेदार' },
+  mr: { task: 'कार्य', handler: 'जबाबदार' },
+  gu: { task: 'કાર્ય', handler: 'જવાબદાર' },
+};
+
 const ACCENTS = ['#2f6fed', '#0f9d8a', '#d9622b', '#7a4fe0', '#c0397a', '#1f8a4c', '#b7791f', '#2b7a9b'];
 
 const hashOf = (s) => {
@@ -175,6 +184,8 @@ export function invitationData(item, settings, { code = 'en', now = new Date() }
   return {
     fam,
     labels: L,
+    kicker: item.kind === 'todo' ? TASK_LABELS[fam].task : L.invitation,
+    hostLabel: item.kind === 'todo' ? TASK_LABELS[fam].handler : L.host,
     ref,
     seed,
     accent: ACCENTS[seed % ACCENTS.length],
@@ -242,14 +253,14 @@ body{font-family:"Noto Sans","Noto Sans Devanagari","Noto Sans Gujarati","Noto C
 </style></head><body class="${d.fam === 'en' || d.fam === 'hl' ? '' : 'native'}"><div class="card">
 <div class="top"><svg class="deco" viewBox="0 0 1080 560">${circles}</svg>
 <div class="brand"><div class="name">${LOGO('#fff')}<span>${escapeHtml(d.persona)}</span></div><div class="pill">${escapeHtml(d.status)}</div></div>
-<div class="kicker">${escapeHtml(d.labels.invitation)}</div>
+<div class="kicker">${escapeHtml(d.kicker)}</div>
 <div class="title">${escapeHtml(d.title)}</div></div>
 <div class="body">
 ${d.day ? `<div class="date"><div><div class="wd">${escapeHtml(d.weekday)}</div><div class="num">${escapeHtml(d.day)}</div><div class="my">${escapeHtml(d.monthYear)}</div></div><div class="time">${escapeHtml(d.time)}</div></div>` : ''}
 <div class="rows">
 ${row(d.labels.where, d.place, '<svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>')}
 ${row(d.labels.who, d.contact, '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14a6 6 0 0 1 3 6"/></svg>')}
-${row(d.labels.host, d.owner, '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>')}
+${row(d.hostLabel, d.owner, '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>')}
 </div></div>
 <div class="foot"><span>${escapeHtml(d.footer)}</span><span><b>${escapeHtml(d.ref)}</b>${dot}${escapeHtml(d.issued)}</span></div>
 </div></body></html>`;

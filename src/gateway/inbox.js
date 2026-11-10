@@ -12,7 +12,7 @@ import { deleteKeysMatching, KeyedQueue, normalizePhone, phoneFromWid, sleep, ui
 import { renderTemplate } from '../core/settings-schema.js';
 import { helpText, parseCommand } from '../brain/commands.js';
 import { TOPICS } from '../bus/index.js';
-import { formatWhen } from '../brain/agenda.js';
+import { ownerAsk, ownerHelp, ownerNotice, ownerPendingList, ownerResultLine, parseOwnerCommand, resolveDecision } from '../brain/owner-commands.js';
 import { replyLanguage } from '../brain/lang.js';
 import { EchoTracker } from '../core/echo.js';
 import { confirmationText, declineText, invitationData, invitationHtml } from '../brain/invite.js';
@@ -64,7 +64,11 @@ export class Inbox {
 
   async handleIncoming(msg) {
     if (msg.isStatus || msg.from === 'status@broadcast' || msg.broadcast) return;
-    if (msg.fromMe) return; // our own alerts to the owner's number, or the owner texting themselves
+    if (msg.fromMe) {
+      // our own alerts to the owner's number, or the owner texting themselves ("ok 12" answers an agenda request)
+      await this.#ownerCommand(msg).catch((err) => this.log.warn('Owner command failed', { err }));
+      return;
+    }
     const chatId = msg.from;
     const isGroup = chatId.endsWith('@g.us');
     const waContact = await msg.getContact().catch(() => null);
@@ -180,40 +184,135 @@ export class Inbox {
 
   /** Message the owner on their own WhatsApp number (alerts). Returns false when WhatsApp is not connected. */
   async notifyOwner(text) {
+    return !!(await this.#sendToOwner(text));
+  }
+
+  /** Send to the owner's own chat; returns the sent message (or null when WhatsApp is not connected / sending failed). */
+  async #sendToOwner(text) {
     const me = this.wa.me?.wid;
-    if (!me || !this.wa.ready) return false;
+    if (!me || !this.wa.ready) return null;
     try {
-      await this.#send(me, text);
-      return true;
+      return await this.#send(me, text);
     } catch (err) {
       this.log.warn('Could not message the owner', { err });
-      return false;
+      return null;
     }
   }
 
-  /** The owner confirmed or declined an appointment in the console and chose to tell the contact. */
+  /**
+   * The owner confirmed or declined an agenda item (console or their own WhatsApp) and the contact is told.
+   * Confirming sends a localized confirmation with a freshly drawn invitation card, for meetings and to-dos alike;
+   * if the card cannot be drawn or sent, the confirmation still goes out as text.
+   * @returns {Promise<{sent: boolean, card: boolean}>}
+   */
   async notifyAgendaDecision(item, status) {
-    if (!item.chatId || !['confirmed', 'declined'].includes(status)) return false;
+    if (!item.chatId || !['confirmed', 'declined'].includes(status)) return { sent: false, card: false };
     const s = this.settings.get();
     // Same language the contact wrote the request in (Hindi, Gujarati, Marathi, Hinglish; English otherwise).
     const lang = replyLanguage(item.sourceMessage || item.title || '', [], null);
     const p = { code: lang.code, name: item.contactName, owner: s.ownerName, title: item.title, dueAt: item.dueAt, allDay: item.allDay, place: item.location, timeZone: s.timezone };
     if (status === 'declined') {
       await this.#sendSystem(item.chatId, declineText(p), 'agenda');
-      return true;
+      return { sent: true, card: false };
     }
     const text = confirmationText(p);
-    // A freshly generated invitation card goes with the confirmation; if it cannot be drawn the text still goes out.
-    if (s.agendaCard && item.kind === 'appointment') {
+    if (s.agendaCard) {
       try {
         const png = await this.renderInvitation(item, lang.code);
         await this.#sendImageSystem(item.chatId, png, text, 'agenda');
-        return true;
+        return { sent: true, card: true };
       } catch (err) {
         this.log.warn('Invitation card failed; sending the confirmation as text', { id: item.id, err });
       }
     }
     await this.#sendSystem(item.chatId, text, 'agenda');
+    return { sent: true, card: false };
+  }
+
+  /**
+   * Apply an owner decision to an agenda item: set the status, tell the contact (confirm/decline), refresh the console.
+   * Used by the owner's WhatsApp replies; the console's PATCH does the same steps with its own field edits.
+   */
+  async decideAgenda(item, action) {
+    const status = { confirm: 'confirmed', decline: 'declined', done: 'done' }[action];
+    if (!status) return { item, action, error: 'unknown action' };
+    if (item.status === status) return { item, action, skipped: true };
+    const updated = await this.repo.updateAgendaItem(item.id, { status });
+    let r = { sent: false, card: false };
+    if (action !== 'done' && this.settings.get().agendaConfirm) {
+      r = await this.notifyAgendaDecision(updated, status).catch((err) => {
+        this.log.warn('Could not tell the contact about the agenda decision', { id: item.id, err });
+        return { sent: false, card: false };
+      });
+    }
+    this.hub.emit('agenda:update', { id: item.id });
+    return { item: updated, action, notified: r.sent, card: r.card };
+  }
+
+  // -------------------------------------------------- the owner answers from their own WhatsApp
+
+  /** Is this message the owner writing to themselves ("Message yourself")? Only the owner's account can send fromMe. */
+  #isSelfChat(msg) {
+    const me = this.wa.me?.wid;
+    if (!me || !msg.fromMe) return false;
+    return msg.from === msg.to || (phoneFromWid(msg.to) && phoneFromWid(msg.to) === phoneFromWid(me));
+  }
+
+  async #quotedAgendaId(msg) {
+    if (!msg.hasQuotedMsg) return null;
+    try {
+      const q = await msg.getQuotedMessage();
+      const v = q?.id?._serialized ? await this.redis.get(keys.agendaMsg(q.id._serialized)) : null;
+      return v ? Number(v) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * "ok 12", "no 7", "confirm 3 5", "ok" (quote-reply or the only pending request), "pending": handled here, answered in
+   * the same chat. Returns true when the message was an owner command (so it is not logged as a chat message).
+   */
+  async #ownerCommand(msg) {
+    if (!this.#isSelfChat(msg)) return false;
+    const cmd = parseOwnerCommand(msg.body);
+    if (!cmd) return false;
+    const id = msg.id?._serialized;
+    // The same message can arrive as a 'message' and as a 'message_create' event: act once.
+    if (id && !(await this.redis.set(keys.ownerCmd(id), '1', 'EX', 300, 'NX'))) return true;
+    const tz = this.settings.get().timezone;
+    const reply = (text) => this.#send(msg.to, text).catch((err) => this.log.warn('Could not answer the owner', { err }));
+    if (cmd.type === 'help') {
+      await reply(ownerHelp());
+      return true;
+    }
+    const open = await this.repo.listAgenda({ view: 'open', limit: 300 });
+    const pending = open.filter((i) => i.status === 'pending');
+    if (cmd.type === 'list') {
+      await reply(ownerPendingList(pending, { timeZone: tz }));
+      return true;
+    }
+    const quotedId = await this.#quotedAgendaId(msg);
+    const lookup = new Map(open.map((i) => [i.id, i]));
+    for (const wanted of [...(cmd.ids || []), quotedId].filter(Boolean)) if (!lookup.has(wanted)) lookup.set(wanted, await this.repo.getAgendaItem(wanted));
+    const d = resolveDecision(cmd, { pending, byId: (n) => lookup.get(n) || null, quotedId });
+    if (d.kind === 'ignore') return false; // "ok" with nothing waiting is just a note to self
+    if (d.kind === 'ask') {
+      await reply(ownerAsk(d.pending, { timeZone: tz }));
+      return true;
+    }
+    const lines = [];
+    for (const item of d.targets) {
+      try {
+        lines.push(ownerResultLine(await this.decideAgenda(item, d.action)));
+      } catch (err) {
+        this.log.error('Owner command failed', { id: item.id, err });
+        lines.push(ownerResultLine({ item, error: 'something went wrong, try the console' }));
+      }
+    }
+    for (const n of d.unknown) lines.push(`⚠️ #${n}: no such request. Send "pending" to see what is waiting.`);
+    this.log.info('Agenda decided from the owner\'s WhatsApp', { action: d.action, ids: d.targets.map((t) => t.id) });
+    await reply(lines.join('\n'));
     return true;
   }
 
@@ -263,13 +362,14 @@ export class Inbox {
   async #onAgenda(ev) {
     this.hub.emit('agenda:update', { id: ev.itemId, created: !!ev.created });
     const s = this.settings.get();
-    if (!ev.created || !s.notifyOwnerOnAgenda) return;
+    // New request → tell the owner. A refinement of a request still waiting ("make it 6pm") → tell them what changed.
+    if (!s.notifyOwnerOnAgenda || (!ev.created && !ev.changed)) return;
     const item = await this.repo.getAgendaItem(ev.itemId);
-    if (!item) return;
-    const who = item.contactName || item.phone || 'a contact';
-    const when = item.dueAt ? ` — ${formatWhen(item.dueAt, s.timezone, item.allDay)}` : '';
-    const head = item.kind === 'appointment' ? '📅 Meeting request' : '📝 New to-do';
-    await this.notifyOwner(`${head} from ${who}: ${item.title}${when}\nReview it in the console → Agenda.`);
+    if (!item || (!ev.created && item.status !== 'pending')) return;
+    // Every request carries its number (#id); the owner answers "ok 12" from their own WhatsApp, or quote-replies "ok".
+    const sent = await this.#sendToOwner(ownerNotice(item, { timeZone: s.timezone, updated: !ev.created }));
+    const sentId = sent?.id?._serialized;
+    if (sentId) await this.redis.set(keys.agendaMsg(sentId), String(item.id), 'EX', 14 * 86_400).catch(() => {});
   }
 
   #enqueue(contact, body, messageId, isGroup) {
@@ -426,6 +526,8 @@ export class Inbox {
     if (!chatId || chatId === 'status@broadcast') return;
     // Our own AI/console message echoing back (by WhatsApp id, or by text if the event beat sendMessage): not the owner typing.
     if (this.echo.isOurs(chatId, msg.body, msg.id?._serialized)) return;
+    // The owner answering an agenda request in their own chat is a command, not a chat message or a takeover.
+    if (await this.#ownerCommand(msg).catch(() => false)) return;
     if (!(await this.repo.getContactByChatId(chatId))) {
       await this.repo.upsertContactForChat({ chatId, phone: phoneFromWid(chatId), name: null, isGroup: chatId.endsWith('@g.us') });
     }

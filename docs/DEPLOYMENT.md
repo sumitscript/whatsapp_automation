@@ -242,3 +242,14 @@ Run it from a checkout (with `npm run eval -- --model gemma3:4b`, `OLLAMA_URL` p
 3. In the same card choose **Groq**, pick a model (e.g. `llama-3.3-70b-versatile`, or `llama-3.1-8b-instant` for the highest limits) and save. It applies to the next message.
 
 Behaviour: keys are used in turn; when one reports a rate limit the next key serves the same request immediately; when every key is rate-limited or Groq is unreachable the local Ollama model answers (turn this off with "Fall back to the local model"). Keep the local model installed: it is the fallback and also does memory summaries and agenda extraction. Stored keys are encrypted with a key derived from `JWT_SECRET`; if you rotate `JWT_SECRET`, add the console keys again. The Settings card shows each key's live state (ready, rate-limited with a countdown, rejected) and how many calls each served.
+
+## Answering agenda requests from your own WhatsApp
+
+When someone asks you for a meeting or a favour, the bot sends a message to your own WhatsApp chat ("Message yourself") with the request and its number, e.g. `Meeting request #12 from Prachi`. Reply there:
+
+- `ok 12`, `12 yes`, `confirm 12`, `haan 12`: confirm. The requester gets the confirmation message with an invitation card.
+- `no 12`, `decline 12`: decline (the requester is told).
+- `done 12`: mark done. `ok 3 5` or `ok all`: several at once. `pending`: list what is waiting. `help`.
+- Replying to a request message with just `ok` or `no` also works; so does a bare `ok` when only one request is waiting.
+
+Concurrency: `GROQ_CONCURRENCY` (default 32) caps parallel Groq calls; the real limit is each key's own rate limit, which the key rotation handles. `LLM_CONCURRENCY` is only for the local CPU model (keep 1 to 2).

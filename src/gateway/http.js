@@ -386,19 +386,22 @@ export function createApp(deps) {
     if (!before) throw httpError(404, 'Agenda item not found');
     const item = await repo.updateAgendaItem(id, normalizeAllDay(value));
     let notified = false;
-    // Accepting an appointment tells the contact by default (setting `agendaConfirm`; the console sends notify:false to
+    let card = false;
+    // Accepting an appointment or request tells the contact by default (setting `agendaConfirm`; the console sends notify:false to
     // skip it for one item). Declines and other statuses only message the contact when notify:true is sent.
     const statusChanged = value.status && value.status !== before.status;
-    const autoConfirm = statusChanged && value.status === 'confirmed' && before.kind === 'appointment' && settings.get().agendaConfirm && req.body?.notify !== false;
+    const autoConfirm = statusChanged && value.status === 'confirmed' && settings.get().agendaConfirm && req.body?.notify !== false;
     if (statusChanged && (req.body?.notify === true || autoConfirm)) {
-      notified = await inbox.notifyAgendaDecision(item, value.status).catch((err) => {
+      const r = await inbox.notifyAgendaDecision(item, value.status).catch((err) => {
         log.warn('Could not tell the contact about the agenda decision', { id, err });
-        return false;
+        return { sent: false, card: false };
       });
+      notified = r.sent;
+      card = r.card;
     }
-    audit(req, 'agenda.update', { id, keys: Object.keys(value), notified });
+    audit(req, 'agenda.update', { id, keys: Object.keys(value), notified, card });
     hub.emit('agenda:update', { id });
-    res.json({ item, notified });
+    res.json({ item, notified, card });
   });
   // The invitation card as an image: preview it in the console, or send it to the contact on demand.
   api.get('/agenda/:id/card.png', async (req, res) => {
@@ -412,7 +415,7 @@ export function createApp(deps) {
     const id = agendaId(req);
     const item = await repo.getAgendaItem(id);
     if (!item) throw httpError(404, 'Agenda item not found');
-    if (item.kind !== 'appointment' || !item.chatId) throw httpError(400, 'Only appointments linked to a chat can be sent as an invitation');
+    if (!item.chatId) throw httpError(400, 'Only items linked to a chat can be sent to the contact');
     await inbox.sendInvitation(item);
     audit(req, 'agenda.send-card', { id });
     res.json({ ok: true });

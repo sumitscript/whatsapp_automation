@@ -13,6 +13,8 @@ export const keys = Object.freeze({
   cacheHits: (day) => `${P}stats:cache_hits:${day}`,
   waStatus: `${P}wa:status`,
   workerStatus: `${P}worker:status`,
+  agendaMsg: (waMessageId) => `${P}agenda:msg:${waMessageId}`, // owner notice message → agenda item number (for quote-replies)
+  ownerCmd: (waMessageId) => `${P}ownercmd:${waMessageId}`, // an owner command already handled (dedupe)
 });
 
 /** Globs for everything stored per chat (wiped when the WhatsApp account is logged out with "delete data"). */
