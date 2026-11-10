@@ -26,7 +26,6 @@ I announced I was taking myself "hostage (not really)" for 30 days to learn the 
 ## Fun Facts About Me (Sumit Soni)
 
 - I built the Faahhh Terminal Sound VS Code extension because people kept joking about it online. Its first real test was an actual error that made my laptop blast "faaaahhhh" while I was designing the logo.
-- My friend Mehul Gosavi got a shout-out in my NeoAI post because his phone "survived more test messages than he'd care to admit."
 - Python wasn't my primary stack, yet I learned OpenCV and MediaPipe from scratch to build a hand gesture-controlled image viewer.
 - After a college Mobile App Development exam didn't go well, I immediately finished a Udemy MAD micro-course: "setbacks are just setups for comebacks."
 - I earned my own new laptop through my work and thanked my mentors and parents.

@@ -21,7 +21,6 @@ I built NeoAI, an AI-driven WhatsApp bot that acts as a support genie for iamneo
 - Microservices architecture linking a FastAPI (Python) RAG service with a Node.js whatsapp-web.js gateway, built for high concurrent traffic.
 - The RAG pipeline gives context-grounded answers from private enterprise knowledge bases.
 - Results: about 90% lower response latency and 10x better scalability, with strong business interest.
-- I jokingly credit my friend Mehul Gosavi, whose phone "survived more test messages than he'd care to admit."
 
 ## AI-Powered Precise Train Traffic Control System (Konkan Railway)
 
