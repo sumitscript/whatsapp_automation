@@ -4,7 +4,7 @@ import http from 'node:http';
 import { KeyPool, parseDuration } from '../src/llm/key-pool.js';
 import { GroqClient, GroqRequestError, GroqUnavailableError } from '../src/llm/groq.js';
 import { RoutedLlm } from '../src/llm/router.js';
-import { KeyStore, parseKeyList } from '../src/llm/key-store.js';
+import { KeyStore, isGroqKeyFormat, parseKeyList } from '../src/llm/key-store.js';
 import { decryptSecret, encryptSecret, maskKey } from '../src/core/secrets.js';
 import { Semaphore } from '../src/core/util.js';
 import { DEFAULT_SETTINGS, sanitizeSettings } from '../src/core/settings-schema.js';
@@ -26,6 +26,15 @@ test('secrets: encrypt/decrypt round trip, wrong secret fails, mask hides the ke
   assert.equal(decryptSecret(tok.slice(0, -3) + 'AAA', 'server-secret'), null, 'tampering is detected');
   assert.equal(encryptSecret('x', 's') === encryptSecret('x', 's'), false, 'a fresh IV every time');
   assert.equal(maskKey('gsk_abcdefghijklmnop1234'), 'gsk_…1234');
+});
+
+test('key format check accepts real-looking keys and rejects junk', () => {
+  assert.equal(isGroqKeyFormat(`gsk_${'aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dE3fG5hJ7kL9mN1pQ3rS'}`), true);
+  assert.equal(isGroqKeyFormat('gsk_with space_in_the_middle_of_the_key'), false);
+  assert.equal(isGroqKeyFormat('short'), false);
+  assert.equal(isGroqKeyFormat(''), false);
+  assert.equal(isGroqKeyFormat(null), false);
+  assert.equal(isGroqKeyFormat(`gsk_${'a'.repeat(300)}`), false);
 });
 
 test('durations from Groq headers', () => {

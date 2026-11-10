@@ -9,6 +9,7 @@ import { deriveLlmState } from '../llm/status.js';
 import { replyLanguage } from '../brain/lang.js';
 import { encryptSecret, maskKey } from '../core/secrets.js';
 import { GroqClient } from '../llm/groq.js';
+import { isGroqKeyFormat } from '../llm/key-store.js';
 import { localParts, looksLikeCommitmentInContext, sanitizeAgendaInput, summarizeAgenda, zonedToUtc } from '../brain/agenda.js';
 
 const CHAT_ID = /^[\w.\-:@]{3,120}$/;
@@ -226,7 +227,6 @@ export function createApp(deps) {
   // Keys come from GROQ_API_KEYS (read-only here) and from the console (stored encrypted). The worker owns the live
   // rate-limit state of each key; this merges its heartbeat over the key list so the console shows what really happens.
   const groqDeps = deps.groq;
-  const GROQ_KEY = /^[w-]{20,200}$/;
   const keyChanged = async () => {
     await groqDeps.store.onChange();
     await redis.publish(channels.llmKeys, String(Date.now()));
@@ -256,7 +256,7 @@ export function createApp(deps) {
   api.post('/llm/groq/keys', async (req, res) => {
     const key = String(req.body?.key || '').trim();
     const label = String(req.body?.label || '').trim().slice(0, 60);
-    if (!GROQ_KEY.test(key)) throw httpError(400, 'That does not look like a Groq API key (it starts with gsk_ and has no spaces)');
+    if (!isGroqKeyFormat(key)) throw httpError(400, 'That does not look like a Groq API key (it starts with gsk_ and has no spaces)');
     if (groqDeps.pool.status().some((k) => groqDeps.pool.secretOf(k.id) === key)) throw httpError(409, 'That key is already added');
     const check = await GroqClient.probe(key, { baseUrl: config.groq.baseUrl });
     if (!check.ok) throw httpError(400, check.error || 'Groq did not accept this key');
@@ -483,7 +483,7 @@ export function createApp(deps) {
     }
     // Optional: try the hosted route from the playground without changing the live setting.
     if (req.body?.provider === 'groq' || req.body?.provider === 'ollama') s = { ...s, llmProvider: req.body.provider };
-    if (typeof req.body?.groqModel === 'string' && /^[w.-/:]{1,100}$/.test(req.body.groqModel)) s = { ...s, groqModel: req.body.groqModel };
+    if (typeof req.body?.groqModel === 'string' && /^[\w.\-/:]{1,100}$/.test(req.body.groqModel)) s = { ...s, groqModel: req.body.groqModel };
     return s;
   };
   const playgroundHistory = (req) =>

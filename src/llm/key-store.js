@@ -2,6 +2,9 @@
 // (stored encrypted in Postgres). Keeps a KeyPool in sync, in every process that uses it.
 import { decryptSecret } from '../core/secrets.js';
 
+/** A Groq API key as pasted by a person: no spaces, letters/digits/underscore/dash, 20–200 characters (they start with gsk_). */
+export const isGroqKeyFormat = (key) => /^[\w-]{20,200}$/.test(String(key || ''));
+
 /** "gsk_a, gsk_b\ngsk_c" → ['gsk_a','gsk_b','gsk_c'] (blank and duplicate entries dropped). */
 export function parseKeyList(text) {
   return [...new Set(String(text || '').split(/[\s,;]+/).map((k) => k.trim()).filter(Boolean))];
