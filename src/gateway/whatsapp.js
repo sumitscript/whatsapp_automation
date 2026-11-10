@@ -7,7 +7,7 @@ import path from 'node:path';
 import QRCode from 'qrcode';
 import wweb from 'whatsapp-web.js';
 
-const { Client, LocalAuth } = wweb;
+const { Client, LocalAuth, MessageMedia } = wweb;
 
 const NO_RECONNECT = /LOGOUT|max qrcode retries|unpaired/i;
 
@@ -189,6 +189,40 @@ export class WhatsAppManager extends EventEmitter {
   async sendText(chatId, text, { quotedMessageId } = {}) {
     this.#requireReady();
     return this.client.sendMessage(chatId, text, quotedMessageId ? { quotedMessageId } : {});
+  }
+
+  /** Send a PNG (a Buffer) with an optional caption. */
+  async sendImage(chatId, png, { caption, filename = 'invitation.png' } = {}) {
+    this.#requireReady();
+    const media = new MessageMedia('image/png', Buffer.from(png).toString('base64'), filename);
+    return this.client.sendMessage(chatId, media, caption ? { caption } : {});
+  }
+
+  /**
+   * Render an HTML document to a PNG with the Chromium WhatsApp already runs (a throw-away tab, no
+   * JavaScript, no network). One render at a time so a burst of invitations cannot starve the session.
+   */
+  async renderHtml(html, { width = 1080, height = 1350, scale = 1 } = {}) {
+    const browser = this.client?.pupPage?.browser?.();
+    if (!browser) {
+      const err = new Error('The WhatsApp browser is not running yet');
+      err.status = 409;
+      throw err;
+    }
+    const run = async () => {
+      const page = await browser.newPage();
+      try {
+        await page.setJavaScriptEnabled(false);
+        await page.setViewport({ width, height, deviceScaleFactor: scale });
+        await page.setContent(html, { waitUntil: 'load', timeout: 15_000 });
+        return Buffer.from(await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width, height } }));
+      } finally {
+        await page.close().catch(() => {});
+      }
+    };
+    const next = (this.renderChain || Promise.resolve()).then(run, run);
+    this.renderChain = next.catch(() => {});
+    return next;
   }
 
   /**

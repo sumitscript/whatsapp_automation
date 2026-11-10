@@ -156,7 +156,7 @@ test('the reply model is told not to agree to meetings on the owner\'s behalf', 
   const path = await import('node:path');
   const kb = await new KnowledgeBase({ dir: path.join(import.meta.dirname, 'fixtures', 'kb'), minScore: 0.5 }).load();
   const brain = createBrain({ kb, llm, ...createMemoryStores() });
-  for await (const ev of brain.respond({ chatId: 'm1', text: "let's meet tomorrow at 5pm", settings: { ...DEFAULT_SETTINGS, model: 'x' } })) void ev;
+  for await (const ev of brain.respond({ chatId: 'm1', text: "let's meet tomorrow at 5pm", settings: { ...DEFAULT_SETTINGS, model: 'x', meetingAck: false } })) void ev; // the template reply is off: the model path keeps its rule
   assert.match(calls[0].messages.at(-1).content, /pass it on and the real \w+ will confirm/);
 });
 

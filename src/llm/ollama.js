@@ -12,36 +12,69 @@ export class OllamaClient {
     this.log = logger;
   }
 
-  async #request(path, { method = 'GET', body, signal, timeoutMs = this.timeoutMs } = {}) {
-    const timeout = AbortSignal.timeout(timeoutMs);
-    const res = await fetch(this.url + path, {
-      method,
-      headers: body ? { 'content-type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-    });
+  /**
+   * `idle: true` is for streamed replies: the timeout then means "no data for timeoutMs" and restarts on every
+   * chunk, instead of capping the whole reply (a 700-token story on a CPU legitimately takes minutes, and a
+   * fixed cap cut it off mid-sentence). Reading the prompt before the first token still has to fit in timeoutMs.
+   */
+  async #request(path, { method = 'GET', body, signal, timeoutMs = this.timeoutMs, idle = false } = {}) {
+    let sig;
+    let watch = null;
+    if (idle) {
+      const ctl = new AbortController();
+      let timer;
+      const arm = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => ctl.abort(new Error(`Ollama sent no data for ${Math.round(timeoutMs / 1000)}s`)), timeoutMs);
+      };
+      watch = { touch: arm, stop: () => clearTimeout(timer) };
+      arm();
+      sig = signal ? AbortSignal.any([signal, ctl.signal]) : ctl.signal;
+    } else {
+      const timeout = AbortSignal.timeout(timeoutMs);
+      sig = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    }
+    let res;
+    try {
+      res = await fetch(this.url + path, {
+        method,
+        headers: body ? { 'content-type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: sig,
+      });
+    } catch (err) {
+      watch?.stop();
+      throw err;
+    }
     if (!res.ok) {
+      watch?.stop();
       const text = await res.text().catch(() => '');
       const err = new Error(`Ollama ${method} ${path} → ${res.status}: ${text.slice(0, 300)}`);
       err.status = res.status;
       throw err;
     }
+    if (watch) res.idleWatch = watch;
     return res;
   }
 
   async *#ndjson(res) {
     const decoder = new TextDecoder();
     let buf = '';
-    for await (const chunk of res.body) {
-      buf += decoder.decode(chunk, { stream: true });
-      let nl;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (line) yield JSON.parse(line);
+    try {
+      for await (const chunk of res.body) {
+        res.idleWatch?.touch();
+        buf += decoder.decode(chunk, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (line) yield JSON.parse(line);
+        }
       }
+      if (buf.trim()) yield JSON.parse(buf);
+    } finally {
+      res.idleWatch?.stop();
     }
-    if (buf.trim()) yield JSON.parse(buf);
   }
 
   async health() {
@@ -173,7 +206,7 @@ export class OllamaClient {
       options: this.buildOptions({ temperature, maxTokens }),
     };
     if (THINKING_FAMILIES.test(model)) body.think = false; // reasoning traces are pure latency here
-    const res = await this.#request('/api/chat', { method: 'POST', body, signal });
+    const res = await this.#request('/api/chat', { method: 'POST', body, signal, idle: true });
     for await (const ev of this.#ndjson(res)) {
       if (ev.error) throw new Error(ev.error);
       const text = ev.message?.content;

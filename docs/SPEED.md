@@ -32,6 +32,14 @@ Reading is 60 to 80% of the wait. Two replies generated at the same moment each 
 
 Setting: `prefillAhead` (Settings → Think ahead). The worker also pre-reads the persona alone after a restart or model change.
 
+## Scheduling (what waits for what)
+
+- **The gate wraps model calls only.** Template replies (meeting requests), answer-cache hits and commands never touch the model, so they are answered at once instead of queueing behind a 30-second story.
+- **Priorities.** Waiting model calls are served 1 = normal reply, 2 = long reply (story, code: token budget over 450), 3 = background (memory folds, agenda extraction), 4 = think-ahead. A waiter gains one step per 20 s of waiting, so long replies are delayed by short ones but never starved.
+- **Live work pre-empts the rest.** A new message aborts think-ahead and any running background job (which is re-queued); once background work finishes, the persona prefix it overwrote in Ollama's cache is read back.
+- **One reply per burst** (`core/coalesce.js`): queued jobs of a chat fold into the newest; a generation that has not spoken yet is aborted and re-run with the new text. Debounce is therefore short (400 ms).
+- **Idle timeout.** `LLM_TIMEOUT_MS` is "no data for N seconds" for streamed replies (restarted on every chunk), not a cap on the whole reply, so long stories are no longer cut off. A model that is not ready within `WORKER_MODEL_WAIT_MS` (20 s) fails the job with a notice instead of parking every chat.
+
 ## Measured effect of think-ahead
 
 Prompt-reading time of the real reply, neutral messages (no knowledge-base lookups), 3 repetitions each:

@@ -66,31 +66,106 @@ const MONTHS = { jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr:
 const MONTH_RE = Object.keys(MONTHS).sort((a, b) => b.length - a.length).join('|');
 
 const EVENING = /\b(evening|night|tonight|shaam|raat|afternoon|dopahar|pm)\b/;
+const MORNING = /\b(morning|subah|subha)\b/;
 
-const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+const NUMBER_WORDS = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  // Hindi / Hinglish number words ("paanch baje", "chhe subah")
+  ek: 1, do: 2, teen: 3, char: 4, chaar: 4, paanch: 5, panch: 5, paach: 5, chhe: 6, chhah: 6, chah: 6, che: 6, saat: 7, aath: 8, nau: 9, das: 10, gyarah: 11, barah: 12, baarah: 12,
+};
+const NUMBER_WORD_RE = Object.keys(NUMBER_WORDS).sort((a, b) => b.length - a.length).join('|');
+
+// Native-script words → the Latin tokens the rest of this file reads. Hindi, Marathi and Gujarati cover
+// most of the chats this twin gets; a script that is missing here still works through the LLM extraction.
+const NATIVE_WORDS = {
+  // Hindi / Marathi (Devanagari)
+  कल: 'kal', आज: 'aaj', परसों: 'parso', परसो: 'parso', परवा: 'parso', उद्या: 'kal',
+  सुबह: 'subah', सवेरे: 'subah', सकाळी: 'subah', शाम: 'shaam', संध्याकाळी: 'shaam', रात: 'raat', रात्री: 'raat', दोपहर: 'dopahar', दुपारी: 'dopahar',
+  बजे: 'baje', वाजता: 'baje', वाजले: 'baje',
+  मिलना: 'milna', मिलते: 'milte', मिलेंगे: 'milenge', मिलें: 'milein', मिलूंगा: 'milunga', मिलूँगा: 'milunga', मिलूंगी: 'milunga', मुलाकात: 'mulakat', भेटू: 'milna', भेटूया: 'milna', भेटायचं: 'milna', भेटायचे: 'milna',
+  मीटिंग: 'meeting', मिटिंग: 'meeting', कॉल: 'call', फोन: 'phone', बैठक: 'meeting',
+  सोमवार: 'monday', मंगलवार: 'tuesday', बुधवार: 'wednesday', गुरुवार: 'thursday', बृहस्पतिवार: 'thursday', शुक्रवार: 'friday', शनिवार: 'saturday', रविवार: 'sunday',
+  एक: 'ek', दो: 'do', तीन: 'teen', चार: 'char', पांच: 'paanch', पाँच: 'paanch', छह: 'chhe', छः: 'chhe', छ: 'chhe', सात: 'saat', आठ: 'aath', नौ: 'nau', दस: 'das', ग्यारह: 'gyarah', बारह: 'barah',
+  साढ़े: 'sadhe', साढे: 'sadhe', सवा: 'sava', पौने: 'paune', डेढ़: 'dedh', ढाई: 'dhai',
+  // Gujarati
+  આવતીકાલ: 'kal', કાલે: 'kal', આજે: 'aaj', પરમ: 'parso', સવારે: 'subah', બપોરે: 'dopahar', સાંજે: 'shaam', રાત્રે: 'raat', વાગ્યે: 'baje', વાગે: 'baje',
+  મળવું: 'milna', મળીએ: 'milte', મળશું: 'milenge', મળીશું: 'milenge', મુલાકાત: 'mulakat', મીટિંગ: 'meeting', કોલ: 'call',
+  સોમવાર: 'monday', મંગળવાર: 'tuesday', બુધવાર: 'wednesday', ગુરુવાર: 'thursday', શુક્રવાર: 'friday', શનિવાર: 'saturday', રવિવાર: 'sunday',
+  સાડા: 'sadhe',
+};
+const NATIVE_RULES = Object.entries(NATIVE_WORDS)
+  .sort((a, b) => b[0].length - a[0].length)
+  .map(([w, to]) => [new RegExp(`(?<![\\p{L}\\p{M}])${w}(?![\\p{L}\\p{M}])`, 'gu'), ` ${to} `]);
+// Latin spellings of Hindi/Gujarati/Marathi weekdays and phrases people type every day.
+const LATIN_WORDS = [
+  // Names like "Ravi" or "Tom" are not weekdays or "tomorrow": only the unambiguous spellings are mapped.
+  [/\b(?:somvar|somwar|somvaar)\b/g, 'monday'], [/\b(?:mangalvar|mangalwar|mangalvaar)\b/g, 'tuesday'], [/\b(?:budhvar|budhwar|budhvaar)\b/g, 'wednesday'],
+  [/\b(?:guruvar|guruwar|guruvaar|brihaspativar|brihaspatiwar|veervar|virvar)\b/g, 'thursday'], [/\b(?:shukravar|shukrawar|shukravaar)\b/g, 'friday'],
+  [/\b(?:shanivar|shaniwar|shanivaar)\b/g, 'saturday'], [/\b(?:ravivar|raviwar|ravivaar|itwar|itvar)\b/g, 'sunday'],
+  [/\b(?:agle|agla|agli)\s+(?:hafte|hafta|week|saptah)\b/g, 'next week'], [/\b(?:is|iss|isi)\s+weekend\b/g, 'weekend'],
+  [/\b(?:aavtikal|aavatikal|avtikal|udya|uddya|2morrow|2moro|2mrw|tomrw)\b/g, 'tomorrow'], [/\b(?:savere|savare)\b/g, 'subah'], [/\bparson\b/g, 'parso'],
+];
 
 /**
- * People type times loosely: "six p m", "6 p.m", "five o'clock", "at seven baje".
- * Lower-cases and rewrites those into the digit forms the date reader understands.
+ * People type times loosely: "six p m", "6 p.m", "five o'clock", "at seven baje", "sadhe paanch baje",
+ * "५ बजे", "5 to 6pm", "1730 hrs". Lower-cases and rewrites those into the digit forms the date reader
+ * understands, folding Devanagari/Gujarati words and digits into the same Latin tokens first.
  */
 export function normalizeTimeText(text) {
-  return String(text ?? '')
+  let s = String(text ?? '')
     .toLowerCase()
-    .replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b(?=\s*(?:o['’]?clock|[ap]\s?\.?\s?m\b|baje|bje|(?:in the |at )?(?:morning|afternoon|evening|night|subah|shaam|raat|dopahar)\b))/g, (w) => String(NUMBER_WORDS[w]))
+    // native digits → 0-9
+    .replace(/[०-९]/g, (d) => String(d.charCodeAt(0) - 0x0966))
+    .replace(/[૦-૯]/g, (d) => String(d.charCodeAt(0) - 0x0ae6))
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660));
+  for (const [re, to] of NATIVE_RULES) s = s.replace(re, to);
+  for (const [re, to] of LATIN_WORDS) s = s.replace(re, to);
+  s = s.replace(/\s{2,}/g, ' ');
+  const cue = String.raw`(?=\s*(?:o['’]?clock|[ap]\s?\.?\s?m\b|baje|bje|(?:in the |at )?(?:morning|afternoon|evening|night|subah|shaam|raat|dopahar)\b))`;
+  s = s
+    .replace(new RegExp(String.raw`\b(${NUMBER_WORD_RE})\b${cue}`, 'g'), (w) => String(NUMBER_WORDS[w]))
+    // Hindi fractions: "sadhe 5 baje" = 5:30, "sava 5" = 5:15, "paune 6" = 5:45, "dedh baje" = 1:30, "dhai baje" = 2:30
+    .replace(/\bsadhe\s+(\d{1,2})\b/g, '$1:30')
+    .replace(/\bsava\s+(\d{1,2})\b/g, '$1:15')
+    .replace(/\bpaune\s+(\d{1,2})\b/g, (_, n) => `${(+n + 11) % 12 || 12}:45`)
+    .replace(/\bdedh(?=\s*baje)/g, '1:30')
+    .replace(/\bdhai(?=\s*baje)/g, '2:30')
     .replace(/(\d)\s*([ap])\s?\.?\s?m\b\.?/g, '$1$2m')
+    // military time: "1730 hrs" -> 17:30
+    .replace(/\b([01]\d|2[0-3])([0-5]\d)\s*(?:hrs|hours|hr)\b/g, '$1:$2')
+    // "5 to 6pm" / "5-6 pm" → the start time; the suffix comes from the end unless the start would pass it ("11-1pm")
+    .replace(/\b(\d{1,2})(?::(\d{2}))?\s*(?:to|-|–|—|se|till|until)\s*(\d{1,2})(?::(\d{2}))?([ap]m)\b/g, (_, h1, m1, h2, m2, ap) => {
+      const suffix = +h1 > +h2 && ap === 'pm' && +h1 !== 12 ? 'am' : ap;
+      return `${h1}${m1 ? `:${m1}` : ''}${suffix} to ${h2}${m2 ? `:${m2}` : ''}${ap}`;
+    })
     // "6 in the morning" / "chhe subah" -> 6am; "5 in the evening" -> 5pm (the hour needs a number in front)
     .replace(/\b(\d{1,2})(:\d{2})?\s*(?:in the |at )?(?:morning|subah)\b/g, '$1$2am')
     .replace(/\b(\d{1,2})(:\d{2})?\s*(?:in the |at )?(?:afternoon|evening|night|shaam|raat|dopahar)\b/g, '$1$2pm');
+  return s;
 }
 
 // "at the railway station", "near zudio office, vadodara": a place named in the message, for when the model leaves
 // `location` empty. Only the first place phrase; a time ("at 6") never counts.
 const PLACE = /\b(?:at|near|outside|opposite|in front of|behind|inside)\s+(?:the\s+)?([a-z][^,.;\n!?]{2,50}?)(?=\s+(?:at|by|around|tomorrow|today|tonight|on)\b|[,.;\n!?]|$)/i;
+// Hinglish puts the place first: "railway station pe milte hain", "office ke bahar", "ghar par". Up to 3 words
+// before the postposition, minus time words and pronouns.
+const POSTPOSITION = /\b((?:[a-z][a-z'-]*\s+){0,3}[a-z][a-z'-]*)\s+(?:pe|par|mein|me|ke paas|ke bahar|ke samne|ke pass|ke andar)\b/;
+const NOT_PLACE = new Set(['kal', 'aaj', 'parso', 'subah', 'shaam', 'raat', 'dopahar', 'baje', 'am', 'pm', 'tomorrow', 'today', 'tonight', 'at', 'on', 'ko', 'se', 'tak', 'tum', 'aap', 'main', 'mai', 'hum', 'kya', 'abhi', 'ye', 'yeh', 'wo', 'vo', 'is', 'us', 'mera', 'meri', 'mere', 'tumhare', 'aapke', 'ki', 'ka', 'ke', 'hai', 'hain', 'ho', 'to', 'toh', 'bhi', 'next', 'week', 'weekend', 'milte', 'milna', 'milenge', 'baat', 'call', 'meeting', 'meet', 'and', 'the', 'ek', 'do', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']);
 export function guessLocation(text) {
-  const m = PLACE.exec(normalizeTimeText(text));
-  if (!m) return null;
-  const v = m[1].trim().replace(/\s+/g, ' ');
-  return v.length < 3 ? null : v.charAt(0).toUpperCase() + v.slice(1);
+  const norm = normalizeTimeText(text);
+  const m = PLACE.exec(norm);
+  if (m) {
+    const v = m[1].trim().replace(/\s+/g, ' ');
+    return v.length < 3 ? null : v.charAt(0).toUpperCase() + v.slice(1);
+  }
+  const h = POSTPOSITION.exec(norm.replace(/[,.;!?]/g, ' '));
+  if (!h) return null;
+  const words = h[1].split(/\s+/).filter((w) => !/^\d/.test(w));
+  while (words.length && NOT_PLACE.has(words[0])) words.shift();
+  while (words.length && NOT_PLACE.has(words.at(-1))) words.pop();
+  const v = words.slice(-3).join(' ');
+  if (v.length < 3 || words.some((w) => NOT_PLACE.has(w) && w !== 'ke')) return null;
+  return v.charAt(0).toUpperCase() + v.slice(1);
 }
 
 /**
@@ -143,6 +218,22 @@ export function parseWhen(text, { now = new Date(), timeZone = 'Asia/Kolkata' } 
     day = explicitDate(today, +m[2], MONTHS[m[1]], null);
     take(m);
   }
+  // "on the 12th", "by 20th": a day of the month with no month name
+  if (!day && (m = /\b(?:on|by|till|until|the)\s+(\d{1,2})(?:st|nd|rd|th)\b/.exec(t)) && +m[1] >= 1 && +m[1] <= 31) {
+    const dom = +m[1];
+    const next = dom >= today.d ? { y: today.y, m: today.m } : today.m === 12 ? { y: today.y + 1, m: 1 } : { y: today.y, m: today.m + 1 };
+    day = { y: next.y, m: next.m, d: dom };
+    take(m);
+  }
+  // "this weekend" → Saturday; "next week" / "agle hafte" → Monday of next week (both all-day unless a time follows)
+  if (!day && (m = /\bweekend\b/.exec(t))) {
+    day = addDays(today.y, today.m, today.d, (6 - today.wd + 7) % 7);
+    take(m);
+  }
+  if (!day && (m = /\bnext week\b/.exec(t))) {
+    day = addDays(today.y, today.m, today.d, (1 - today.wd + 7) % 7 || 7);
+    take(m);
+  }
 
   // ---- time ----
   let hour = null;
@@ -155,24 +246,44 @@ export function parseWhen(text, { now = new Date(), timeZone = 'Asia/Kolkata' } 
       take(m);
     }
   }
-  if (hour == null && (m = /\b([01]?\d|2[0-3]):([0-5]\d)\b/.exec(t))) {
+  if (hour == null && (m = /\b([01]?\d|2[0-3]):([0-5]\d)\b(\s*baje)?/.exec(t))) {
     hour = +m[1];
     minute = +m[2];
+    // "sadhe 5 baje" (5:30) is an everyday clock reading, not a 24-hour time: apply the same am/pm guess as "5 baje"
+    if (m[3] && hour >= 1 && hour <= 11) hour = hour <= 6 && !MORNING.test(t) ? hour + 12 : hour < 12 && EVENING.test(t) && !MORNING.test(t) ? hour + 12 : hour;
     take(m);
   }
   if (hour == null && (m = /\b(?:at|by|around)\s+(\d{1,2})(?:[:.]([0-5]\d))?\b(?!\s*(?:st|nd|rd|th|\/|-))|\b(\d{1,2})(?:[:.]([0-5]\d))?\s*(?:baje|bje|o['’]?clock)\b/.exec(t))) {
     const h = +(m[1] ?? m[3]);
     minute = +(m[2] ?? m[4] ?? 0);
     if (h >= 1 && h <= 23) {
-      hour = h <= 6 || (h < 12 && EVENING.test(t)) ? h + 12 : h;
+      // 1–6 mean pm ("5 baje") unless the message says morning ("subah 5 baje")
+      hour = (h <= 6 && !MORNING.test(t)) || (h < 12 && EVENING.test(t) && !MORNING.test(t)) ? h + 12 : h;
       take(m);
     }
   }
+  if (hour == null && !day) {
+    // "in 2 hours", "after 30 min", "2 ghante baad", "3 din mein": relative to now
+    const rel = /\b(?:in|after|within)\s+(\d{1,3}|an?|one|two|three|four|five|six|seven|eight|nine|ten)\s*(minutes?|mins?|hours?|hrs?|days?|weeks?)\b|\b(\d{1,3})\s*(minutes?|mins?|ghante|ghanta|hours?|hrs?|din|dino|hafte|weeks?)\s*(?:baad|bad|mein|me)\b/.exec(t);
+    if (rel) {
+      const raw = rel[1] ?? rel[3];
+      const n = /^\d+$/.test(raw) ? +raw : raw === 'a' || raw === 'an' ? 1 : NUMBER_WORDS[raw];
+      const unit = rel[2] ?? rel[4];
+      if (n >= 1) {
+        if (/^(day|din|week|hafte)/.test(unit)) {
+          const d = addDays(today.y, today.m, today.d, n * (/^(week|hafte)/.test(unit) ? 7 : 1));
+          return { dueAt: zonedToUtc(d.y, d.m, d.d, 9, 0, timeZone), allDay: true, hasDay: true, matched: rel[0].trim() };
+        }
+        const ms = n * (/^(hour|hr|ghant)/.test(unit) ? 3600_000 : 60_000);
+        return { dueAt: new Date(Math.ceil((now.getTime() + ms) / 60_000) * 60_000), allDay: false, hasDay: true, matched: rel[0].trim() };
+      }
+    }
+  }
   if (hour == null) {
-    const part = /\b(noon|midday|midnight|morning|subah|subha|afternoon|dopahar|evening|shaam|tonight|night|raat)\b/.exec(t);
+    const part = /\b(noon|midday|midnight|morning|subah|subha|afternoon|dopahar|evening|shaam|tonight|night|raat|breakfast|brunch|lunch|dinner)\b/.exec(t);
     if (part) {
       const w = part[1];
-      hour = { noon: 12, midday: 12, midnight: 0, morning: 9, subah: 9, subha: 9, afternoon: 15, dopahar: 15, evening: 18, shaam: 18, tonight: 20, night: 20, raat: 20 }[w];
+      hour = { noon: 12, midday: 12, midnight: 0, morning: 9, subah: 9, subha: 9, afternoon: 15, dopahar: 15, evening: 18, shaam: 18, tonight: 20, night: 20, raat: 20, breakfast: 9, brunch: 11, lunch: 13, dinner: 20 }[w];
       take(part);
     }
   } else if (hour < 12 && /\b(evening|night|shaam|raat|afternoon|dopahar)\b/.test(t) && !/\b(a\.?m\.?)\b/.test(t)) {
@@ -211,13 +322,15 @@ function explicitDate(today, d, m, y) {
 
 // ------------------------------------------------------- spotting commitments
 
+// All gates run on normalizeTimeText(): lower-cased, with Hindi/Marathi/Gujarati words and digits folded to Latin tokens.
 const MEET =
-  /\b(meet|meeting|meetup|catch ?up|call|calling|lunch|dinner|breakfast|coffee|visit|appointment|schedule[d]?|reschedule|interview|demo|discussion|sync|session|hangout|come over|coming|milte|milenge|milna|mulakat|bulana|aana|aaunga|aaoge)\b/i;
+  /\b(meet|meeting|meetup|catch ?up|call|calling|lunch|dinner|breakfast|brunch|coffee|visit|appointment|schedule[d]?|reschedule|interview|demo|discussion|sync|session|hangout|come over|coming|get together|milte|milenge|milna|milein|milunga|mil sakte|mil lete|mulakat|bulana|aana|aaunga|aaungi|aaoge|baat karni|baat karte|call karna|call karo|phone karna|phone karo|malishu|malvu|bhetu|ghar aana)\b/i;
 const TODO =
   /\b(remind(?:er)?|remember to|don'?t forget|dont forget|todo|to-do|deadline|due (?:on|by|date)|submit|send me|share (?:the|your|it)|follow ?up|call ?back|yaad dil\w*|yaad rakh\w*)\b/i;
 const STRONG_TIME =
-  /\b(today|tonight|tomorrow|tmrw|tomm?orow|tommorrow|day after|kal|aaj|parso|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|weekend|\d{1,2}\s*(?::\d{2})?\s*(?:am|pm)|\d{1,2}:\d{2}|\d{1,2}\s*baje)\b/i;
-const ASK = /\b(free|available|availability|let'?s|lets|shall we|can we|can you|could you|will you|are you (?:coming|free)|come|aana|aa jao|milte)\b/i;
+  /\b(today|tonight|tomorrow|tmrw|tomm?orow|tommorrow|day after|kal|aaj|parso|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|weekend|subah|shaam|dopahar|\d{1,2}\s*(?::\d{2})?\s*(?:am|pm)|\d{1,2}:\d{2}|\d{1,2}\s*baje|(?:in|after)\s+(?:\d+|an?|one|two|three|four|five|ten)\s*(?:minutes?|mins?|hours?|hrs?|days?|weeks?)|\d+\s*(?:ghante|ghanta|din|minutes?|mins?)\s*(?:baad|mein|me)|(?:on|by|the)\s+\d{1,2}(?:st|nd|rd|th))\b/i;
+const ASK =
+  /\b(free|available|availability|let'?s|lets|shall we|can we|can you|could you|will you|are you (?:coming|free)|come|aana|aa jao|aa sakte|aa sakta|aa sakti|aa paoge|milte|chalo|chalein|chaloge|chalte hain|free ho|available ho|kab|karte hain|rakhte hain|rakhein|fix karte|fix karein)\b/i;
 
 /** Cheap gate so the LLM only reads messages that might hold a commitment. */
 export function looksLikeCommitment(text) {
@@ -252,10 +365,25 @@ export function asksAboutPlans(text) {
 }
 
 export function isMeetingRequest(text) {
-  const s = String(text ?? '');
-  if (TEXT_TASK.test(s)) return false;
+  if (TEXT_TASK.test(String(text ?? ''))) return false;
+  const s = normalizeTimeText(text);
   return (MEET.test(s) && (STRONG_TIME.test(s) || ASK.test(s))) || (STRONG_TIME.test(s) && (ASK.test(s) || DIRECT_ASK.test(s))) || (MEET.test(s) && DIRECT_ASK.test(s));
 }
+
+/** The text talks about meeting/calling/eating together (no time needed). */
+export function mentionsMeeting(text) {
+  return !TEXT_TASK.test(String(text ?? '')) && MEET.test(normalizeTimeText(text));
+}
+
+/** What sort of get-together: a call, a meal or a plain meeting. Used for titles and the invitation card. */
+export function meetingKind(text) {
+  const s = normalizeTimeText(text);
+  if (/\b(call|calling|call karna|call karo|phone karna|phone karo|baat karni|baat karte)\b/.test(s)) return 'call';
+  if (/\b(lunch|dinner|breakfast|brunch|coffee)\b/.test(s)) return 'meal';
+  return 'meet';
+}
+
+const KIND_TITLE = { call: 'Call with', meal: 'Meal with', meet: 'Meet' };
 
 // ---------------------------------------------------------------- extraction
 
@@ -335,10 +463,12 @@ export function resolveItems(items, { text, userTexts = [], now = new Date(), ti
 /** Item built without the LLM, when the message is clearly a meeting request. */
 export function heuristicItem({ text, contextText = '', contactName, now = new Date(), timeZone = 'Asia/Kolkata' }) {
   const hit = parseWhen(text, { now, timeZone });
-  const meet = MEET.test(text) || MEET.test(contextText); // "I want to meet" may be an earlier message
-  if (!hit && !TODO.test(text)) return null;
+  const norm = normalizeTimeText(text);
+  const meet = MEET.test(norm) || MEET.test(normalizeTimeText(contextText)); // "I want to meet" may be an earlier message
+  if (!hit && !TODO.test(norm)) return null;
   if (meet && hit) {
-    return { kind: 'appointment', title: `Meet ${firstName(contactName || 'contact')}`, details: clip(text.trim(), 300), when: hit.matched, dueAt: hit.dueAt, allDay: hit.allDay, dueText: hit.matched, location: null };
+    const kind = meetingKind(`${contextText}\n${text}`);
+    return { kind: 'appointment', title: `${KIND_TITLE[kind]} ${firstName(contactName || 'contact')}`, details: clip(text.trim(), 300), when: hit.matched, dueAt: hit.dueAt, allDay: hit.allDay, dueText: hit.matched, location: guessLocation(text) };
   }
   return { kind: 'todo', title: clip(text.trim(), 80), details: null, when: hit?.matched ?? null, dueAt: hit?.dueAt ?? null, allDay: hit?.allDay ?? false, dueText: hit?.matched ?? null, location: null };
 }

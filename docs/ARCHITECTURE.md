@@ -51,7 +51,7 @@ eSumit is Sumit's AI twin on WhatsApp. It is a self-hosted system with two Node 
    - Start and stop commands change session state even if the chat is paused.
    - The welcome, goodbye and `/help` replies are instant templates and make no LLM call.
 4. In `session` mode an open session is required, and each message touches it. Per-chat `aiPaused` and owner takeover (Redis `takeover:<chatId>`) keep the AI quiet.
-5. Bursts are debounced (`debounceMs`). The gateway sends seen and typing, then publishes a `{type:'reply'}` job to `wa.inbound`.
+5. Bursts are debounced (`debounceMs`, default 400 ms) and merged into one reply by the worker (`core/coalesce.js`). The gateway sends seen and typing, then publishes a `{type:'reply'}` job to `wa.inbound`.
 6. The worker (consumer group `ai-worker`) runs the pipeline and streams bubbles back on `wa.outbound`.
 7. The gateway (consumer group `gateway`) delivers them in order per chat:
    - It refreshes typing every 20 s and saves each bubble.

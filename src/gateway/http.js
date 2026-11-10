@@ -6,6 +6,7 @@ import { config } from '../core/config.js';
 import { channels, keys, recentLogs, withinRate } from '../core/redis.js';
 import { catalogWithInstalled } from '../llm/catalog.js';
 import { deriveLlmState } from '../llm/status.js';
+import { replyLanguage } from '../brain/lang.js';
 import { localParts, looksLikeCommitmentInContext, sanitizeAgendaInput, summarizeAgenda, zonedToUtc } from '../brain/agenda.js';
 
 const CHAT_ID = /^[\w.\-:@]{3,120}$/;
@@ -306,7 +307,11 @@ export function createApp(deps) {
     if (!before) throw httpError(404, 'Agenda item not found');
     const item = await repo.updateAgendaItem(id, normalizeAllDay(value));
     let notified = false;
-    if (req.body?.notify === true && value.status && value.status !== before.status) {
+    // Accepting an appointment tells the contact by default (setting `agendaConfirm`; the console sends notify:false to
+    // skip it for one item). Declines and other statuses only message the contact when notify:true is sent.
+    const statusChanged = value.status && value.status !== before.status;
+    const autoConfirm = statusChanged && value.status === 'confirmed' && before.kind === 'appointment' && settings.get().agendaConfirm && req.body?.notify !== false;
+    if (statusChanged && (req.body?.notify === true || autoConfirm)) {
       notified = await inbox.notifyAgendaDecision(item, value.status).catch((err) => {
         log.warn('Could not tell the contact about the agenda decision', { id, err });
         return false;
@@ -315,6 +320,23 @@ export function createApp(deps) {
     audit(req, 'agenda.update', { id, keys: Object.keys(value), notified });
     hub.emit('agenda:update', { id });
     res.json({ item, notified });
+  });
+  // The invitation card as an image: preview it in the console, or send it to the contact on demand.
+  api.get('/agenda/:id/card.png', async (req, res) => {
+    const item = await repo.getAgendaItem(agendaId(req));
+    if (!item) throw httpError(404, 'Agenda item not found');
+    const lang = replyLanguage(item.sourceMessage || item.title || '', [], null);
+    const png = await inbox.renderInvitation(item, lang.code);
+    res.set({ 'content-type': 'image/png', 'cache-control': 'no-store' }).send(png);
+  });
+  api.post('/agenda/:id/send-card', async (req, res) => {
+    const id = agendaId(req);
+    const item = await repo.getAgendaItem(id);
+    if (!item) throw httpError(404, 'Agenda item not found');
+    if (item.kind !== 'appointment' || !item.chatId) throw httpError(400, 'Only appointments linked to a chat can be sent as an invitation');
+    await inbox.sendInvitation(item);
+    audit(req, 'agenda.send-card', { id });
+    res.json({ ok: true });
   });
   api.delete('/agenda/:id', async (req, res) => {
     const id = agendaId(req);

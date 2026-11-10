@@ -8,13 +8,16 @@
 import { INTENT_PROFILES, isFollowUp, resolveIntent } from './intent.js';
 import { replyLanguage, statedLanguagePreference } from './lang.js';
 import { MessageChunker } from './format.js';
-import { asksAboutPlans, buildExtractionMessages, guessLocation, heuristicItem, isMeetingRequest, parseExtraction, resolveItems } from './agenda.js';
+import { isRepeat, recentBubbles } from './repeat.js';
+import { asksAboutPlans, buildExtractionMessages, guessLocation, heuristicItem, isMeetingRequest, meetingKind, mentionsMeeting, parseExtraction, parseWhen, resolveItems } from './agenda.js';
+import { meetingAck } from './invite.js';
 import { estimateTokens, normalize } from '../rag/text.js';
 import { ownerAliasList, renderPersona } from '../core/settings-schema.js';
 import { clamp, sha1 } from '../core/util.js';
 
 const FALLBACK = "Hmm, I couldn't put a good answer together for that — could you say it another way?";
 const SAFETY_TOKENS = 256;
+const BACKGROUND_PRIORITY = 3; // LLM gate priority for memory folds and agenda extraction (live replies are 1–2, think-ahead 4)
 const TYPICAL_TURN_TOKENS = 150; // size of the final user turn (facts + rules + message) assumed when pre-reading
 const REFERS_TO_PAST = /\b(remember|recall|last time|earlier|before|previously|already told|i told you|yaad|pichli baar|pichhli baar|pehle|kal|bataya tha|याद|पिछली)\b/i;
 const WANTS_ANSWER =
@@ -182,6 +185,35 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     const askedQuestionLast = lastTurn?.role === 'assistant' && /\?\s*[\p{Extended_Pictographic}\s]*$/u.test(lastTurn.content);
     const wantsAnswer = WANTS_ANSWER.test(text);
 
+    // --- Meeting requests: an instant template in their language, never an agreement ---
+    // "let's meet tomorrow at 6", "kal subah 6 baje station pe milte hain", "कल शाम 5 बजे मीटिंग", or a
+    // follow-up that only carries the time ("tomorrow at six near the office" after "I want to meet").
+    // A small model gets these wrong (it says "sure!" or invents a plan); a template cannot. The worker still
+    // files the request in the Agenda for the owner to confirm.
+    if (settings.meetingAck !== false && intent === 'general' && !asksAboutPlans(text) && text.length <= 400) {
+      const tz = settings.timezone || 'Asia/Kolkata';
+      const hit = parseWhen(text, { timeZone: tz });
+      const before = theirMessages.slice(-3).join('\n');
+      if (isMeetingRequest(text) || (hit && before && mentionsMeeting(before))) {
+        const ack = meetingAck({
+          code: lang.code,
+          name: contactName,
+          owner: settings.ownerName,
+          kind: meetingKind(`${before}\n${text}`),
+          dueAt: hit?.dueAt,
+          allDay: hit?.allDay,
+          place: guessLocation(text) || guessLocation(before),
+          timeZone: tz,
+        });
+        const meta = { model: 'template', intent: 'meeting', inheritedIntent: false, language: lang.code, sources: [], retrievalMs: 0, cached: false };
+        yield { type: 'chunk', text: ack, index: 0, meta };
+        if (chatId) await memory.append(chatId, [{ role: 'user', content: text }, { role: 'assistant', content: ack }]);
+        const latencyMs = Math.round(performance.now() - started);
+        yield { type: 'done', reply: ack, meta: { ...meta, latencyMs, firstChunkMs: latencyMs } };
+        return;
+      }
+    }
+
     // --- Retrieval (vectorless, ~1ms) ---
     let retrieval = null;
     // Tiny general messages ("ok", "2+2", "one more") and meeting requests never deserve knowledge-base facts.
@@ -231,7 +263,7 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     const messages = [{ role: 'system', content: system }, ...picked, { role: 'user', content: userTurn }];
     const temperature = profile.temperature ?? settings.temperature;
     const liveMeta = { ...baseMeta, cached: false };
-    const chunker = new MessageChunker({ split: settings.humanize });
+    let chunker = new MessageChunker({ split: settings.humanize });
     const bubbles = [];
     let firstChunkMs = null;
     let stats = null;
@@ -242,17 +274,50 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
       return { type: 'chunk', text: piece, index: bubbles.length - 1, meta: liveMeta };
     };
 
-    for await (const ev of llm.chat({ model: settings.model, messages, temperature, maxTokens, signal })) {
-      if (ev.type === 'done') {
-        stats = ev.stats;
-        break;
+    // A small model sometimes starts with what it already said. Catch that on the first bubble (nothing
+    // is sent yet) and retry once, warmer and told to say something new; later bubbles stream as before.
+    const earlier = recentBubbles(turns);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const own = new AbortController();
+      const sig = signal ? AbortSignal.any([signal, own.signal]) : own.signal;
+      const retry = attempt === 1;
+      const req = retry ? [...messages.slice(0, -1), { role: 'user', content: `${userTurn}\n(I already said almost exactly that. Say something new and different, shorter.)` }] : messages;
+      let repeated = false;
+      stats = null;
+      chunker = new MessageChunker({ split: settings.humanize });
+      try {
+        for await (const ev of llm.chat({ model: settings.model, messages: req, temperature: retry ? Math.min(1.1, temperature + 0.25) : temperature, maxTokens, signal: sig })) {
+          if (ev.type === 'done') {
+            stats = ev.stats;
+            break;
+          }
+          for (const piece of chunker.push(ev.text)) {
+            if (!retry && !bubbles.length && isRepeat(piece, earlier)) {
+              repeated = true;
+              own.abort();
+              break;
+            }
+            yield emit(piece);
+          }
+          if (repeated) break;
+        }
+        // Hit the token limit mid-sentence? Don't send "…and apne fav tech project ke baareme bhi ba".
+        if (!repeated) {
+          for (const piece of chunker.flush()) {
+            const clean = stats?.doneReason === 'length' ? trimDangling(piece) : piece;
+            if (!clean) continue;
+            if (!retry && !bubbles.length && isRepeat(clean, earlier)) {
+              repeated = true;
+              break;
+            }
+            yield emit(clean);
+          }
+        }
+      } catch (err) {
+        if (!repeated) throw err; // our own abort is expected; a caller's abort or a real failure is not
       }
-      for (const piece of chunker.push(ev.text)) yield emit(piece);
-    }
-    // Hit the token limit mid-sentence? Don't send "…and apne fav tech project ke baareme bhi ba".
-    for (const piece of chunker.flush()) {
-      const clean = stats?.doneReason === 'length' ? trimDangling(piece) : piece;
-      if (clean) yield emit(clean);
+      if (!repeated) break;
+      log?.info('Repeated reply caught, regenerating', { chatId });
     }
     if (!bubbles.length) yield emit(FALLBACK);
 
@@ -288,7 +353,7 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
    * Fold conversation turns into the contact's long-term memory notes.
    * Runs off the hot path (worker idle queue).
    */
-  async function summarize({ previous, turns, contactName, settings }) {
+  async function summarize({ previous, turns, contactName, settings, signal }) {
     const owner = String(settings.ownerName || 'the owner').split(/\s+/)[0];
     const who = contactName || 'this contact';
     const lines = [];
@@ -310,7 +375,7 @@ Return ONLY the updated notes.`,
       { role: 'user', content: `Existing notes:\n${previous || '(none)'}\n\nNew conversation:\n${lines.join('\n')}` },
     ];
     let out = '';
-    for await (const ev of llm.chat({ model: settings.model, messages, temperature: 0.2, maxTokens: 220 })) {
+    for await (const ev of llm.chat({ model: settings.model, messages, temperature: 0.2, maxTokens: 220, priority: BACKGROUND_PRIORITY, signal })) {
       if (ev.type === 'token') out += ev.text;
     }
     out = out.trim() || previous || '';
@@ -329,17 +394,18 @@ Return ONLY the updated notes.`,
    * The model decides what the item is; dates are read deterministically.
    * @returns {Promise<object[]>} items with { kind, title, details, location, dueAt, allDay, dueText }
    */
-  async function extractAgenda({ turns, text, contactName, settings, now = new Date() }) {
+  async function extractAgenda({ turns, text, contactName, settings, now = new Date(), signal }) {
     const timeZone = settings.timezone || 'Asia/Kolkata';
     let items = null;
     try {
       let out = '';
       const messages = buildExtractionMessages({ ownerName: settings.ownerName, contactName, turns, now, timeZone });
-      for await (const ev of llm.chat({ model: settings.model, messages, temperature: 0.1, maxTokens: 220 })) {
+      for await (const ev of llm.chat({ model: settings.model, messages, temperature: 0.1, maxTokens: 220, priority: BACKGROUND_PRIORITY, signal })) {
         if (ev.type === 'token') out += ev.text;
       }
       items = parseExtraction(out);
     } catch (err) {
+      if (signal?.aborted) throw err; // pre-empted by a live message: the caller re-queues, no half-made item
       log?.warn('Agenda extraction failed', { err });
     }
     const userTexts = turns.filter((t) => t.role === 'user').map((t) => t.content);

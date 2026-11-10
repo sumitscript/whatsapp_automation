@@ -5,7 +5,7 @@ import {
   $, confirmDialog, debounce, formatNumber, formatTime, html, raw, storageGet, storageSet, toast,
 } from '../util.js';
 
-const NOTIFY_KEY = 'wa-agenda-notify';
+const NOTIFY_KEY = 'wa-agenda-notify2'; // v2: the default changed to "on", so an old saved "off" is ignored
 
 const FILTERS = [
   { id: 'review', label: 'Needs review', params: { status: 'review' } },
@@ -109,8 +109,8 @@ export async function mount(root, { hub }) {
         <div class="toolbar agenda-toolbar">
           <div class="chip-group" id="ag-filters" role="radiogroup" aria-label="Filter agenda"></div>
           <label class="switch-row agenda-notify small">
-            <input type="checkbox" class="switch" id="ag-notify" aria-label="Also message the contact when I confirm or decline" />
-            <span>Also message the contact when I confirm or decline</span>
+            <input type="checkbox" class="switch" id="ag-notify" aria-label="Message the contact when I confirm (with an invitation card) or decline" />
+            <span>Message the contact when I confirm (with an invitation card) or decline</span>
           </label>
         </div>
         <div id="ag-list" aria-live="polite"></div>
@@ -121,7 +121,7 @@ export async function mount(root, { hub }) {
   const tilesEl = $('#ag-tiles', root);
   const filtersEl = $('#ag-filters', root);
   const notifyEl = $('#ag-notify', root);
-  notifyEl.checked = storageGet(NOTIFY_KEY, '0') === '1';
+  notifyEl.checked = storageGet(NOTIFY_KEY, '1') === '1'; // on by default: accepting an appointment tells the contact
   notifyEl.addEventListener('change', () => storageSet(NOTIFY_KEY, notifyEl.checked ? '1' : '0'));
 
   // ---------- rendering ----------
@@ -168,6 +168,10 @@ export async function mount(root, { hub }) {
       a.push(actionBtn('done', id, 'Mark done', 'btn-primary', icons.check));
     }
     if (item.status === 'done' || item.status === 'declined') a.push(actionBtn('reopen', id, 'Reopen', 'btn-ghost', icons.refresh));
+    if (item.kind === 'appointment' && item.dueAt) {
+      a.push(html`<a class="btn btn-sm btn-ghost" href="/api/agenda/${id}/card.png" target="_blank" rel="noopener" aria-label="Preview invitation card"><span>Preview card</span></a>`);
+      if (item.status === 'confirmed' && item.chatId) a.push(actionBtn('card', id, 'Send invitation', 'btn-ghost'));
+    }
     a.push(actionBtn('edit', id, 'Edit'));
     a.push(actionBtn('delete', id, 'Delete', 'btn-ghost agenda-del', icons.trash));
     return a.join('');
@@ -394,7 +398,17 @@ export async function mount(root, { hub }) {
     if (!item) return;
     if (act === 'edit') return openEditor(item);
     if (act === 'confirm') {
-      return mutate(item.id, () => api.agendaUpdate(item.id, { status: 'confirmed', notify: notifyNow() }), 'Confirmed');
+      const notify = notifyNow();
+      let res = null;
+      await mutate(item.id, async () => { res = await api.agendaUpdate(item.id, { status: 'confirmed', notify }); }, 'Confirmed');
+      if (notify && res) {
+        if (res.notified) toast(item.kind === 'appointment' ? 'Contact notified with an invitation card' : 'Contact notified', 'success');
+        else if (item.chatId) toast('Confirmed, but the contact could not be messaged (is WhatsApp connected?)', 'error');
+      }
+      return;
+    }
+    if (act === 'card') {
+      return mutate(item.id, () => api.agendaSendCard(item.id), 'Invitation card sent');
     }
     if (act === 'decline') {
       return mutate(item.id, () => api.agendaUpdate(item.id, { status: 'declined', notify: notifyNow() }), 'Declined');

@@ -7,6 +7,7 @@ import { logger } from '../core/logger.js';
 import { attachRedisLogSink, channels, createRedis, createRedisAnswerCache, createRedisMemory, keys } from '../core/redis.js';
 import { createSettingsService } from '../core/settings.js';
 import { KeyedQueue, Semaphore, sleep } from '../core/util.js';
+import { Coalescer } from '../core/coalesce.js';
 import { createPool, migrate } from '../db/pg.js';
 import { createRepo } from '../db/repo.js';
 import { createBus, TOPICS } from '../bus/index.js';
@@ -17,6 +18,7 @@ import { looksLikeCommitmentInContext, sameItem } from '../brain/agenda.js';
 
 const log = logger.child({ component: 'worker' });
 const STALE_JOB_MS = 5 * 60_000; // don't answer messages that sat in the queue during downtime
+const MODEL_WAIT_MS = Number(process.env.WORKER_MODEL_WAIT_MS || 20_000); // how long a reply waits for a loading model before giving up
 
 const redis = createRedis('main');
 const sub = createRedis('sub');
@@ -37,7 +39,27 @@ sub.on('message', (ch) => {
 
 const llm = new OllamaClient({ ...config.ollama, url: config.ollama.url, timeoutMs: config.ollama.requestTimeoutMs, logger: log });
 const memory = createRedisMemory(redis);
-const brain = createBrain({ kb, llm, memory, cache: createRedisAnswerCache(redis), logger: log });
+
+// The gate bounds parallel *model* calls, and nothing else. Template replies, answer-cache hits and
+// commands never touch the model, so they no longer queue behind someone else's 30-second story.
+// Waiting calls are served by priority: 1 normal reply, 2 long reply (story/code: big token budget),
+// 3 background (memory folds, agenda), 4 think-ahead; aging keeps long jobs from starving.
+const gate = new Semaphore(config.ollama.concurrency);
+const llmGated = {
+  get numCtx() {
+    return llm.numCtx;
+  },
+  async *chat(req) {
+    await gate.acquire({ priority: req.priority ?? (req.maxTokens > 450 ? 2 : 1), signal: req.signal });
+    try {
+      yield* llm.chat(req);
+    } finally {
+      gate.release();
+    }
+  },
+  prefill: (req) => gate.run(() => llm.prefill(req), { priority: 4, signal: req.signal }),
+};
+const brain = createBrain({ kb, llm: llmGated, memory, cache: createRedisAnswerCache(redis), logger: log });
 
 let modelState = { model: settings.get().model, ready: false, error: null };
 async function prepareModel(model) {
@@ -69,7 +91,7 @@ settings.onChange((next, prev) => {
 
 const bus = await createBus({ logger: log, redisFactory: createRedis });
 const lanes = new KeyedQueue(); // one lane per chat → replies stay in order
-const gate = new Semaphore(config.ollama.concurrency); // bounded parallel generations
+const co = new Coalescer(); // bursts of messages → one reply (see core/coalesce.js)
 let inFlight = 0;
 // Background work (agenda extraction, memory folds) waits for a quiet period after the last message or
 // reply: people send bursts, and a background generation started in a gap would split the CPU with the
@@ -100,17 +122,21 @@ function cancelWarm() {
   warmCtl?.abort();
   warmCtl = null;
 }
+// Background work (agenda extraction, memory folds) is pre-empted the same way: a live message aborts it and it is re-queued.
+let bgCtl = null;
+function cancelBg() {
+  bgCtl?.abort(new Error('preempted'));
+  bgCtl = null;
+}
 async function warmChat(chatId) {
   const s = settings.get();
   if (!s.prefillAhead || !modelState.ready || inFlight > 0 || !llm.reusesPrefix(s.model)) return;
   cancelWarm();
   const ctl = (warmCtl = new AbortController());
   try {
-    await gate.run(async () => {
-      if (ctl.signal.aborted || inFlight > 0) return;
-      const r = await brain.warm({ chatId, settings: settings.get(), signal: ctl.signal });
-      log.debug('Think-ahead ready', { chatId, promptTokens: r.promptTokens, ms: r.promptMs });
-    });
+    // brain.warm → llm.prefill takes the gate at the lowest priority, so it only runs when nothing else wants the model
+    const r = await brain.warm({ chatId, settings: settings.get(), signal: ctl.signal });
+    log.debug('Think-ahead ready', { chatId, promptTokens: r.promptTokens, ms: r.promptMs });
   } catch (err) {
     if (!ctl.signal.aborted) log.warn('Think-ahead failed', { chatId, err });
   } finally {
@@ -122,36 +148,67 @@ async function handleJob(job) {
   const out = (payload) => bus.publish(TOPICS.outbound, job.chatId, { jobId: job.jobId, chatId: job.chatId, ...payload });
   if (Date.now() - job.receivedAt > STALE_JOB_MS) {
     log.warn('Dropping stale job', { chatId: job.chatId, ageMs: Date.now() - job.receivedAt });
+    co.claim(job.chatId, job.jobId); // discard it (and anything stuck with it) instead of leaving it pending
+    co.release(job.chatId, job.jobId);
     await out({ type: 'error', error: 'stale', silent: true });
     return;
   }
-  await modelReady;
+  // Ollama down or the model still loading must not park every job (and the "typing…" indicator) forever.
+  const ready = await Promise.race([modelReady.then(() => true), sleep(MODEL_WAIT_MS).then(() => false)]);
+  if (!ready || !modelState.ready) {
+    co.claim(job.chatId, job.jobId);
+    co.release(job.chatId, job.jobId);
+    log.warn('Model not ready; reply skipped', { chatId: job.chatId, model: modelState.model, error: modelState.error });
+    await out({ type: 'error', error: modelState.error || 'model not ready' });
+    return;
+  }
+  // One reply per burst: a newer job from this chat answers everything said since the last reply.
+  const claim = co.claim(job.chatId, job.jobId);
+  if (!claim) {
+    log.info('Folded into a newer message', { chatId: job.chatId, jobId: job.jobId });
+    // Every flushed job holds one "typing…" reference in the gateway; this one will never speak, so release it.
+    await out({ type: 'error', error: 'folded', silent: true });
+    return;
+  }
+  const text = claim.text;
   const s = settings.get();
   inFlight++;
+  let superseded = false;
   try {
     const longTerm = s.memoryEnabled ? await repo.getMemory(job.chatId).catch(() => null) : null;
     const stream = brain.respond({
       chatId: job.chatId,
-      text: job.text,
+      text,
       settings: s,
       contactName: job.contactName || longTerm?.name || null,
       longTermMemory: longTerm?.memory || null,
+      signal: claim.signal,
     });
     for await (const ev of stream) {
-      if (ev.type === 'chunk') await out({ type: 'chunk', index: ev.index, text: ev.text, meta: ev.meta });
-      else if (ev.type === 'done') {
+      if (ev.type === 'chunk') {
+        co.markEmitted(job.chatId);
+        await out({ type: 'chunk', index: ev.index, text: ev.text, meta: ev.meta });
+      } else if (ev.type === 'done') {
         lastReply = { at: Date.now(), latencyMs: ev.meta.latencyMs, firstChunkMs: ev.meta.firstChunkMs, tokensPerSec: ev.meta.tokensPerSec ?? null, cached: !!ev.meta.cached, model: ev.meta.model };
         await out({ type: 'done', meta: ev.meta });
       }
     }
   } catch (err) {
-    lastError = { at: Date.now(), message: err.message };
-    log.error('Reply generation failed', { chatId: job.chatId, err });
-    await out({ type: 'error', error: err.message });
+    if (co.isSuperseded(claim.signal)) {
+      superseded = true; // a newer message arrived before we said anything: its job re-answers both
+      log.info('Reply dropped, newer message arrived', { chatId: job.chatId, jobId: job.jobId });
+      await out({ type: 'error', error: 'superseded', silent: true }).catch(() => {}); // release this job's typing reference
+    } else {
+      lastError = { at: Date.now(), message: err.message };
+      log.error('Reply generation failed', { chatId: job.chatId, err });
+      await out({ type: 'error', error: err.message });
+    }
   } finally {
     inFlight--;
     lastActivity = Date.now();
+    co.release(job.chatId, job.jobId);
   }
+  if (superseded) return;
   warmChat(job.chatId).catch(() => {}); // fire and forget: the next message cancels it if it arrives first
   // Conversation outgrew the verbatim window → fold the oldest turns into long-term memory later.
   const turnsNow = await memory.get(job.chatId).catch(() => []);
@@ -159,17 +216,17 @@ async function handleJob(job) {
   // "let's meet tomorrow at 5" → Agenda (off the hot path, like memory folds). The request and its
   // details often come as separate messages ("I want to meet" … "tomorrow at six near the office").
   const earlierUserTexts = turnsNow.filter((t) => t.role === 'user').map((t) => t.content).slice(0, -1);
-  if (s.agendaEnabled && looksLikeCommitmentInContext(job.text, earlierUserTexts)) agendaQueue.set(job.chatId, { text: job.text, contactName: job.contactName || null, at: Date.now() });
+  if (s.agendaEnabled && looksLikeCommitmentInContext(text, earlierUserTexts)) agendaQueue.set(job.chatId, { text, contactName: job.contactName || null, at: Date.now() });
 }
 
 // ---- Agenda: appointments / to-dos spotted in chats ----
 const agendaQueue = new Map(); // chatId → latest message that looks like a commitment
-async function extractAgendaFor(chatId, { text, contactName }) {
+async function extractAgendaFor(chatId, { text, contactName }, signal) {
   const s = settings.get();
   if (!s.agendaEnabled) return;
   await modelReady;
   const turns = await memory.get(chatId);
-  const found = await brain.extractAgenda({ turns, text, contactName, settings: s });
+  const found = await brain.extractAgenda({ turns, text, contactName, settings: s, signal });
   if (!found.length) return log.debug('No agenda items found', { chatId });
   const existing = await repo.listAgenda({ view: 'open', chatId });
   for (const it of found) {
@@ -194,7 +251,7 @@ let folding = false;
 function scheduleFold(chatId, all) {
   foldQueue.set(chatId, { all: all || foldQueue.get(chatId)?.all || false });
 }
-async function fold(chatId, { all }) {
+async function fold(chatId, { all }, signal) {
   const s = settings.get();
   const turns = await memory.get(chatId);
   const n = turns.length - (all ? 0 : s.historyTurns);
@@ -206,7 +263,7 @@ async function fold(chatId, { all }) {
   await modelReady;
   const started = Date.now();
   const current = await repo.getMemory(chatId);
-  const updated = await brain.summarize({ previous: current.memory, turns: turns.slice(0, n), contactName: current.name, settings: s });
+  const updated = await brain.summarize({ previous: current.memory, turns: turns.slice(0, n), contactName: current.name, settings: s, signal });
   await repo.setMemory(chatId, updated);
   await memory.trimOldest(chatId, n);
   log.info('Long-term memory updated', { chatId, folded: n, ms: Date.now() - started, chars: updated?.length ?? 0 });
@@ -216,27 +273,40 @@ setInterval(async () => {
   if (folding || inFlight > 0 || (!foldQueue.size && !agendaQueue.size)) return;
   if (Date.now() - lastActivity < BG_QUIET_MS) return; // someone is mid-conversation: stay out of the way
   folding = true;
+  const ctl = (bgCtl = new AbortController());
+  let preempted = false;
   try {
     if (agendaQueue.size) {
       // Agenda first: a meeting request is more time-sensitive than a memory summary.
       const [chatId, req] = agendaQueue.entries().next().value;
       agendaQueue.delete(chatId);
       try {
-        await gate.run(() => extractAgendaFor(chatId, req));
+        await extractAgendaFor(chatId, req, ctl.signal);
       } catch (err) {
-        log.warn('Agenda extraction failed', { chatId, err });
+        if (ctl.signal.aborted) {
+          preempted = true;
+          if (!agendaQueue.has(chatId)) agendaQueue.set(chatId, req); // a live message came in: do it later
+          log.debug('Agenda extraction pre-empted by a live message; re-queued', { chatId });
+        } else log.warn('Agenda extraction failed', { chatId, err });
       }
       return;
     }
     const [chatId, opts] = foldQueue.entries().next().value;
     foldQueue.delete(chatId);
     try {
-      await gate.run(() => fold(chatId, opts));
+      await fold(chatId, opts, ctl.signal);
     } catch (err) {
-      log.warn('Memory fold failed', { chatId, err });
+      if (ctl.signal.aborted) {
+        preempted = true;
+        scheduleFold(chatId, opts.all);
+        log.debug('Memory fold pre-empted by a live message; re-queued', { chatId });
+      } else log.warn('Memory fold failed', { chatId, err });
     }
   } finally {
+    if (bgCtl === ctl) bgCtl = null;
     folding = false;
+    // Background prompts overwrite Ollama's cached persona prefix: read it back so the next live reply starts warm.
+    if (!preempted) warmChat(null).catch(() => {});
   }
 }, 1500).unref();
 
@@ -245,8 +315,10 @@ await bus.subscribe(TOPICS.inbound, 'ai-worker', async (job) => {
   if (job.type === 'summarize') return scheduleFold(job.chatId, true); // session ended
   if (!job.text) return;
   lastActivity = Date.now();
-  cancelWarm(); // a real message beats any think-ahead
-  lanes.push(job.chatId, () => gate.run(() => handleJob(job))).catch((err) => log.error('Job failed', { err }));
+  cancelWarm(); // a real message beats any think-ahead…
+  cancelBg(); // …and any background work (re-queued afterwards)
+  co.add(job.chatId, job.jobId, job.text); // may abort a reply that has not started speaking
+  lanes.push(job.chatId, () => handleJob(job)).catch((err) => log.error('Job failed', { err }));
 });
 // After a restart or model switch, pre-read the persona alone: the one prefix every chat shares.
 modelReady.then(() => warmChat(null)).catch(() => {});

@@ -106,6 +106,7 @@ export const api = {
   agendaCreate: (body) => request('POST', '/api/agenda', body),
   agendaUpdate: (id, patch) => request('PATCH', `/api/agenda/${enc(id)}`, patch),
   agendaDelete: (id) => request('DELETE', `/api/agenda/${enc(id)}`),
+  agendaSendCard: (id) => request('POST', `/api/agenda/${enc(id)}/send-card`),
 
   // ops
   logs: (limit = 500, level) => request('GET', `/api/logs${qs({ limit, level })}`),

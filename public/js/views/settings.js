@@ -76,6 +76,9 @@ export async function mount(root, { hub }) {
             <h3 class="section-title">Agenda &amp; alerts</h3>
             <label class="switch-row"><input type="checkbox" class="switch" name="agendaEnabled" /><span>Collect appointments &amp; to-dos from chats<small class="muted"> — "let's meet tomorrow at 5" shows up in the Agenda</small></span></label>
             <label class="switch-row"><input type="checkbox" class="switch" name="notifyOwnerOnAgenda" /><span>WhatsApp me about new agenda items<small class="muted"> — sent to your own number</small></span></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="meetingAck" /><span>Instant reply to meeting requests<small class="muted"> — in their language (English, Hinglish, Hindi, Marathi, Gujarati); says it was noted and passed on, never agrees for you</small></span></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="agendaConfirm" /><span>Tell the contact when I accept an appointment<small class="muted"> — the Agenda's Confirm button sends a confirmation message</small></span></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="agendaCard" /><span>Attach an invitation card to the confirmation<small class="muted"> — an image generated fresh for each appointment</small></span></label>
             <label class="switch-row"><input type="checkbox" class="switch" name="alertOwner" /><span>WhatsApp me if the AI goes down<small class="muted"> — and when it recovers</small></span></label>
             <label class="field"><span>Timezone for "tomorrow at 5pm"</span><input name="timezone" placeholder="Asia/Kolkata" />
               <small class="muted">IANA name, e.g. Asia/Kolkata, Europe/London, America/New_York</small></label>
@@ -150,7 +153,7 @@ export async function mount(root, { hub }) {
       'replyMode', 'ownerName', 'persona', 'temperature', 'maxTokens', 'historyTurns', 'historyTokens', 'debounceMs',
       'humanize', 'answerCache', 'prefillAhead', 'replyInGroups', 'memoryEnabled', 'personaName', 'startCommands', 'stopCommands',
       'welcomeMessage', 'goodbyeMessage', 'sessionIdleMinutes', 'takeoverSeconds',
-      'notifyOnTimeout', 'timeoutMessage', 'unsupportedMessage', 'agendaEnabled', 'notifyOwnerOnAgenda', 'alertOwner', 'timezone',
+      'notifyOnTimeout', 'timeoutMessage', 'unsupportedMessage', 'agendaEnabled', 'notifyOwnerOnAgenda', 'meetingAck', 'agendaConfirm', 'agendaCard', 'alertOwner', 'timezone',
     ].forEach((k) => set(k, st[k]));
     $('#temp-out', root).textContent = Number(form.temperature.value).toFixed(2);
   }
@@ -188,6 +191,9 @@ export async function mount(root, { hub }) {
       unsupportedMessage: form.unsupportedMessage.value,
       agendaEnabled: form.agendaEnabled.checked,
       notifyOwnerOnAgenda: form.notifyOwnerOnAgenda.checked,
+      meetingAck: form.meetingAck.checked,
+      agendaConfirm: form.agendaConfirm.checked,
+      agendaCard: form.agendaCard.checked,
       alertOwner: form.alertOwner.checked,
       timezone: form.timezone.value.trim(),
     };

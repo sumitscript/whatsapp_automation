@@ -13,6 +13,8 @@ import { renderTemplate } from '../core/settings-schema.js';
 import { helpText, parseCommand } from '../brain/commands.js';
 import { TOPICS } from '../bus/index.js';
 import { formatWhen } from '../brain/agenda.js';
+import { replyLanguage } from '../brain/lang.js';
+import { confirmationText, declineText, invitationData, invitationHtml } from '../brain/invite.js';
 
 const TEXT_TYPES = new Set(['chat', 'text']);
 const TYPING_REFRESH_MS = 8_000; // the contact's phone drops "typing…" after ~10–25s, so keep re-sending it
@@ -38,6 +40,7 @@ export class Inbox {
     Object.assign(this, { wa, repo, redis, bus, settings, memory, sessions, hub });
     this.log = logger.child({ component: 'inbox' });
     this.pending = new Map(); // chatId → debounce buffer
+    this.recentOut = new Map(); // chatId → last sent bubbles (duplicate guard)
     this.jobs = new Map(); // jobId → job
     this.typing = new Map(); // chatId → { refs, interval, timeout }
     this.lanes = new KeyedQueue(); // per-chat ordered delivery
@@ -191,15 +194,52 @@ export class Inbox {
   async notifyAgendaDecision(item, status) {
     if (!item.chatId || !['confirmed', 'declined'].includes(status)) return false;
     const s = this.settings.get();
-    const owner = String(s.ownerName || 'the owner').split(/\s+/)[0];
-    const name = String(item.contactName || '').trim().split(/\s+/)[0] || 'there';
-    const when = item.dueAt ? formatWhen(item.dueAt, s.timezone, item.allDay) : 'the time we discussed';
-    const text =
-      status === 'confirmed'
-        ? `Good news ${name}! ${owner} confirmed: ${item.title} — ${when} ✅`
-        : `Hey ${name}, ${owner} can't make this one (${item.title}, ${when}). Feel free to suggest another time 🙏`;
+    // Same language the contact wrote the request in (Hindi, Gujarati, Marathi, Hinglish; English otherwise).
+    const lang = replyLanguage(item.sourceMessage || item.title || '', [], null);
+    const p = { code: lang.code, name: item.contactName, owner: s.ownerName, title: item.title, dueAt: item.dueAt, allDay: item.allDay, place: item.location, timeZone: s.timezone };
+    if (status === 'declined') {
+      await this.#sendSystem(item.chatId, declineText(p), 'agenda');
+      return true;
+    }
+    const text = confirmationText(p);
+    // A freshly generated invitation card goes with the confirmation; if it cannot be drawn the text still goes out.
+    if (s.agendaCard && item.kind === 'appointment') {
+      try {
+        const png = await this.renderInvitation(item, lang.code);
+        await this.#sendImageSystem(item.chatId, png, text, 'agenda');
+        return true;
+      } catch (err) {
+        this.log.warn('Invitation card failed; sending the confirmation as text', { id: item.id, err });
+      }
+    }
     await this.#sendSystem(item.chatId, text, 'agenda');
     return true;
+  }
+
+  /** Draw the invitation card for an agenda item (PNG). */
+  async renderInvitation(item, code = 'en') {
+    return this.wa.renderHtml(invitationHtml(invitationData(item, this.settings.get(), { code })));
+  }
+
+  /** Send a card + caption to the contact (used by the console's "Send invitation" button too). */
+  async sendInvitation(item) {
+    if (!item.chatId) return false;
+    const lang = replyLanguage(item.sourceMessage || item.title || '', [], null);
+    const s = this.settings.get();
+    const text = confirmationText({ code: lang.code, name: item.contactName, owner: s.ownerName, title: item.title, dueAt: item.dueAt, allDay: item.allDay, place: item.location, timeZone: s.timezone });
+    const png = await this.renderInvitation(item, lang.code);
+    await this.#sendImageSystem(item.chatId, png, text, 'agenda');
+    return true;
+  }
+
+  async #sendImageSystem(chatId, png, caption, intent) {
+    const k = `${chatId}|${caption}`; // a media message's body is its caption: recognise the echo like any text
+    this.echo.set(k, (this.echo.get(k) || 0) + 1);
+    setTimeout(() => this.#forgetEcho(k), 30_000).unref();
+    const sent = await this.wa.sendImage(chatId, png, { caption });
+    const saved = await this.repo.insertMessage({ waMessageId: sent?.id?._serialized, chatId, direction: 'out', body: caption, type: 'image', isAi: true, sentBy: 'ai', intent, latencyMs: 0 });
+    if (saved) this.#broadcastMessage(saved, chatId);
+    await this.memory.append(chatId, [{ role: 'assistant', content: caption }]).catch(() => {});
   }
 
   async #onAgenda(ev) {
@@ -248,7 +288,16 @@ export class Inbox {
     setTimeout(() => this.jobs.delete(job.jobId), TYPING_MAX_MS).unref();
     if (this.settings.get().markSeen) this.wa.markSeen(chatId).catch(() => {});
     this.#typingStart(chatId);
-    await this.bus.publish(TOPICS.inbound, chatId, job);
+    try {
+      await this.bus.publish(TOPICS.inbound, chatId, job);
+    } catch (err) {
+      // The job never reached the worker: don't leave "typing…" on for three minutes, and tell the contact.
+      this.jobs.delete(job.jobId);
+      this.#typingStop(chatId);
+      this.log.error('Could not queue the reply job', { chatId, err });
+      await this.#errorNotice(chatId).catch(() => {});
+      return;
+    }
     this.log.info('Reply job queued', { chatId, jobId: job.jobId, parts: buf.texts.length });
   }
 
@@ -278,6 +327,19 @@ export class Inbox {
     if (await this.redis.exists(keys.takeover(chatId))) {
       this.#typingStop(chatId, true);
       return;
+    }
+
+    // Safety net: never send the same sentence twice within 3 minutes (a repeated model loop or a
+    // redelivered event). Very short bubbles ("ok", an emoji) may legitimately repeat.
+    const key = ev.text.trim().toLowerCase();
+    if (key.length >= 12) {
+      const recent = (this.recentOut.get(chatId) || []).filter((r) => Date.now() - r.at < 180_000);
+      if (recent.some((r) => r.key === key)) {
+        this.log.warn('Dropped duplicate bubble', { chatId, jobId: ev.jobId });
+        return;
+      }
+      recent.push({ key, at: Date.now() });
+      this.recentOut.set(chatId, recent.slice(-8));
     }
 
     if (this.settings.get().humanize && job.lastSentAt) {

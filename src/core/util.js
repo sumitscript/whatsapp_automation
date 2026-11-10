@@ -54,26 +54,63 @@ export function memoize(fn, { key = (...a) => JSON.stringify(a), max = 500, ttlM
   return wrapped;
 }
 
-/** Counting semaphore: bounds global concurrency (e.g. parallel LLM generations). */
+const abortReason = (signal) => (signal.reason instanceof Error ? signal.reason : Object.assign(new Error('aborted'), { name: 'AbortError' }));
+
+/**
+ * Counting semaphore: bounds global concurrency (e.g. parallel LLM generations).
+ * Waiters are served by priority (lower number first), then arrival order. A waiter gains one priority
+ * step per `agingMs` of waiting, so a long job is delayed by cheaper ones but never starved. A waiter
+ * whose `signal` aborts leaves the queue and its `acquire()` rejects.
+ */
 export class Semaphore {
-  constructor(n) {
+  constructor(n, { agingMs = 20_000 } = {}) {
     this.free = Math.max(1, n);
     this.waiters = [];
+    this.agingMs = agingMs;
+    this.seq = 0;
   }
-  async acquire() {
+  acquire({ priority = 1, signal } = {}) {
+    if (signal?.aborted) return Promise.reject(abortReason(signal));
     if (this.free > 0) {
       this.free--;
-      return;
+      return Promise.resolve();
     }
-    await new Promise((r) => this.waiters.push(r));
+    return new Promise((resolve, reject) => {
+      const w = { priority, at: Date.now(), seq: this.seq++, resolve, signal, onAbort: null };
+      if (signal) {
+        w.onAbort = () => {
+          const i = this.waiters.indexOf(w);
+          if (i >= 0) this.waiters.splice(i, 1);
+          reject(abortReason(signal));
+        };
+        signal.addEventListener('abort', w.onAbort, { once: true });
+      }
+      this.waiters.push(w);
+    });
   }
   release() {
-    const next = this.waiters.shift();
-    if (next) next();
-    else this.free++;
+    if (!this.waiters.length) {
+      this.free++;
+      return;
+    }
+    const now = Date.now();
+    const rank = (w) => w.priority - Math.floor((now - w.at) / this.agingMs);
+    let best = 0;
+    for (let i = 1; i < this.waiters.length; i++) {
+      const a = this.waiters[i];
+      const b = this.waiters[best];
+      if (rank(a) < rank(b) || (rank(a) === rank(b) && a.seq < b.seq)) best = i;
+    }
+    const [w] = this.waiters.splice(best, 1);
+    if (w.signal) w.signal.removeEventListener('abort', w.onAbort);
+    w.resolve();
   }
-  async run(fn) {
-    await this.acquire();
+  /** Waiting acquirers (for status/tests). */
+  get waiting() {
+    return this.waiters.length;
+  }
+  async run(fn, opts) {
+    await this.acquire(opts);
     try {
       return await fn();
     } finally {

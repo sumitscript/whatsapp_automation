@@ -47,7 +47,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   historyTurns: 10, // messages kept verbatim (older ones are folded into long-term memory)
   historyTokens: 1000, // context-window budget for conversation history
   memoryEnabled: true,
-  debounceMs: 700,
+  debounceMs: 400, // short on purpose: a burst that outruns it is merged into one reply by core/coalesce.js
   replyInGroups: false,
   humanize: true, // split long answers into several bubbles like a person
   answerCache: true,
@@ -69,6 +69,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   alertOwner: true, // WhatsApp the owner (own number) when the LLM goes down / recovers
   agendaEnabled: true, // pull appointments + to-dos out of chats into the Agenda
   notifyOwnerOnAgenda: true, // WhatsApp the owner (own number) about new agenda items
+  meetingAck: true, // meeting requests get an instant template reply in their language (never agrees for the owner)
+  agendaConfirm: true, // confirming/declining an appointment in the console also messages the contact
+  agendaCard: true, // …and the confirmation carries a generated invitation card (image)
   timezone: 'Asia/Kolkata', // IANA zone used to read "tomorrow at 5pm"
   persona: '', // empty = built-in DEFAULT_PERSONA (keeps getting improvements on updates)
 });
@@ -111,6 +114,9 @@ const RULES = {
   alertOwner: bool,
   agendaEnabled: bool,
   notifyOwnerOnAgenda: bool,
+  meetingAck: bool,
+  agendaConfirm: bool,
+  agendaCard: bool,
   timezone: (v) => (typeof v === 'string' && isTimeZone(v.trim()) ? v.trim() : undefined),
   persona: (v) => (typeof v === 'string' && !v.trim() ? '' : text(20, 8000)(v)),
 };
