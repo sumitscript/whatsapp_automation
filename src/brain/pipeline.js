@@ -9,8 +9,8 @@ import { INTENT_PROFILES, isFollowUp, resolveIntent } from './intent.js';
 import { replyLanguage, statedLanguagePreference } from './lang.js';
 import { MessageChunker } from './format.js';
 import { isRepeat, recentBubbles } from './repeat.js';
-import { asksAboutPlans, buildExtractionMessages, guessLocation, heuristicItem, isMeetingRequest, meetingKind, mentionsMeeting, parseExtraction, parseWhen, resolveItems } from './agenda.js';
-import { meetingAck } from './invite.js';
+import { asksAboutPlans, buildExtractionMessages, guessLocation, heuristicItem, isMeetingRequest, isPassOnRequest, meetingKind, mentionsMeeting, parseExtraction, parseWhen, resolveItems } from './agenda.js';
+import { meetingAck, passOnAck } from './invite.js';
 import { estimateTokens, normalize } from '../rag/text.js';
 import { ownerAliasList, renderPersona } from '../core/settings-schema.js';
 import { clamp, sha1 } from '../core/util.js';
@@ -190,12 +190,16 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
     // follow-up that only carries the time ("tomorrow at six near the office" after "I want to meet").
     // A small model gets these wrong (it says "sure!" or invents a plan); a template cannot. The worker still
     // files the request in the Agenda for the owner to confirm.
-    if (settings.meetingAck !== false && intent === 'general' && !asksAboutPlans(text) && text.length <= 400) {
+    // Naming the owner ("I want to meet Sumit at 8") classifies as about_owner and "Hello?" as a greeting, so every
+    // intent qualifies except the ones that are clearly something else (code, maths, jokes, stories).
+    if (settings.meetingAck !== false && !['coding', 'creative', 'math', 'joke'].includes(intent) && !asksAboutPlans(text) && text.length <= 400) {
       const tz = settings.timezone || 'Asia/Kolkata';
       const hit = parseWhen(text, { timeZone: tz });
       const before = theirMessages.slice(-3).join('\n');
+      let ack = null;
+      let ackIntent = 'meeting';
       if (isMeetingRequest(text) || (hit && before && mentionsMeeting(before))) {
-        const ack = meetingAck({
+        ack = meetingAck({
           code: lang.code,
           name: contactName,
           owner: settings.ownerName,
@@ -205,7 +209,13 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
           place: guessLocation(text) || guessLocation(before),
           timeZone: tz,
         });
-        const meta = { model: 'template', intent: 'meeting', inheritedIntent: false, language: lang.code, sources: [], retrievalMs: 0, cached: false };
+      } else if (isPassOnRequest(text, { ownerNames: ownerAliasList(settings) })) {
+        // "remind him", "tell Sumit …", "unhe bol dena": noted and passed on, no promise made
+        ack = passOnAck({ code: lang.code, name: contactName, owner: settings.ownerName });
+        ackIntent = 'pass_on';
+      }
+      if (ack) {
+        const meta = { model: 'template', intent: ackIntent, inheritedIntent: false, language: lang.code, sources: [], retrievalMs: 0, cached: false };
         yield { type: 'chunk', text: ack, index: 0, meta };
         if (chatId) await memory.append(chatId, [{ role: 'user', content: text }, { role: 'assistant', content: ack }]);
         const latencyMs = Math.round(performance.now() - started);
@@ -286,7 +296,13 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
       stats = null;
       chunker = new MessageChunker({ split: settings.humanize });
       try {
-        for await (const ev of llm.chat({ model: settings.model, messages: req, temperature: retry ? Math.min(1.1, temperature + 0.25) : temperature, maxTokens, signal: sig })) {
+        for await (const ev of llm.chat({ model: settings.model, messages: req, temperature: retry ? Math.min(1.1, temperature + 0.25) : temperature, maxTokens, signal: sig, provider: settings.llmProvider, groqModel: settings.groqModel, groqFallback: settings.groqFallback })) {
+          if (ev.type === 'meta') {
+            // The router says which provider/model is answering (Groq key pool or the local model); show it, not the setting.
+            liveMeta.model = ev.model || liveMeta.model;
+            liveMeta.provider = ev.provider;
+            continue;
+          }
           if (ev.type === 'done') {
             stats = ev.stats;
             break;
@@ -435,7 +451,7 @@ Return ONLY the updated notes.`,
     const budget = Math.max(0, Math.min(settings.historyTokens ?? 1500, numCtx - estimateTokens(system) - TYPICAL_TURN_TOKENS - maxTokens - SAFETY_TOKENS));
     const { history: picked } = selectHistory(turns, { maxMessages: settings.historyTurns, maxTokens: budget });
     const messages = [{ role: 'system', content: system }, ...picked, { role: 'user', content: '…' }];
-    return llm.prefill({ model: settings.model, messages, signal });
+    return llm.prefill({ model: settings.model, messages, signal, provider: settings.llmProvider });
   }
 
   return { respond, summarize, extractAgenda, warm };

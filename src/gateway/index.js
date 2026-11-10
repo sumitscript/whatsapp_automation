@@ -13,6 +13,11 @@ import { createAuth } from '../auth/service.js';
 import { createBus, TOPICS } from '../bus/index.js';
 import { KnowledgeBase } from '../rag/kb.js';
 import { OllamaClient } from '../llm/ollama.js';
+import { KeyPool } from '../llm/key-pool.js';
+import { KeyStore } from '../llm/key-store.js';
+import { GroqClient } from '../llm/groq.js';
+import { RoutedLlm } from '../llm/router.js';
+import { Semaphore } from '../core/util.js';
 import { createBrain } from '../brain/pipeline.js';
 import { WhatsAppManager } from './whatsapp.js';
 import { Inbox } from './inbox.js';
@@ -44,7 +49,23 @@ sub.on('message', (ch, version) => {
 
 const llm = new OllamaClient({ ...config.ollama, timeoutMs: config.ollama.requestTimeoutMs, logger: log });
 const memory = createRedisMemory(redis);
-const brain = createBrain({ kb, llm, memory, cache: createRedisAnswerCache(redis), logger: log });
+// Groq keys + router for the console's playground (the worker has its own pool for live chats; both read the same key list).
+const groqPool = new KeyPool();
+const keyStore = new KeyStore({ pool: groqPool, repo, secret: config.auth.jwtSecret, envKeys: config.groq.keys, logger: log });
+await keyStore.start();
+await sub.subscribe(channels.llmKeys);
+sub.on('message', (ch) => {
+  if (ch === channels.llmKeys) keyStore.onChange();
+});
+const groq = new GroqClient({ pool: groqPool, baseUrl: config.groq.baseUrl, timeoutMs: config.groq.timeoutMs, logger: log });
+const router = new RoutedLlm({
+  ollama: llm,
+  groq,
+  getSettings: () => settings.get(),
+  gates: { ollama: new Semaphore(config.ollama.concurrency), groq: new Semaphore(config.groq.concurrency) },
+  logger: log,
+});
+const brain = createBrain({ kb, llm: router, memory, cache: createRedisAnswerCache(redis), logger: log });
 const bus = await createBus({ logger: log, redisFactory: createRedis });
 
 const wa = new WhatsAppManager({ ...config.wa, logger: log });
@@ -53,7 +74,7 @@ const sessions = new SessionManager({ repo, settings, logger: log });
 sessions.startSweeper(); // ends idle sessions (sessionIdleMinutes)
 const inbox = new Inbox({ wa, repo, redis, bus, settings, memory, sessions, hub, logger: log });
 
-const app = createApp({ auth, repo, redis, wa, inbox, settings, kb, llm, brain, memory, hub, logger: log });
+const app = createApp({ auth, repo, redis, wa, inbox, settings, kb, llm, brain, memory, hub, groq: { pool: groqPool, client: groq, store: keyStore, router }, logger: log });
 const server = http.createServer(app);
 const realtime = await createRealtime(server, { auth, wa, subscriber: sub, logger: log });
 hub.emit = realtime.emit;

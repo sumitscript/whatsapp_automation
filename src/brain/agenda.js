@@ -85,6 +85,9 @@ const NATIVE_WORDS = {
   मिलना: 'milna', मिलते: 'milte', मिलेंगे: 'milenge', मिलें: 'milein', मिलूंगा: 'milunga', मिलूँगा: 'milunga', मिलूंगी: 'milunga', मुलाकात: 'mulakat', भेटू: 'milna', भेटूया: 'milna', भेटायचं: 'milna', भेटायचे: 'milna',
   मीटिंग: 'meeting', मिटिंग: 'meeting', कॉल: 'call', फोन: 'phone', बैठक: 'meeting',
   सोमवार: 'monday', मंगलवार: 'tuesday', बुधवार: 'wednesday', गुरुवार: 'thursday', बृहस्पतिवार: 'thursday', शुक्रवार: 'friday', शनिवार: 'saturday', रविवार: 'sunday',
+  // "tell him" in Hindi/Marathi/Gujarati (for isPassOnRequest)
+  उन्हें: 'unhe', उनको: 'unko', उसे: 'usse', उसको: 'usko', बोल: 'bol', बोलो: 'bolo', बोलना: 'bolna', बता: 'bata', बताओ: 'batao', बताना: 'batana', कह: 'keh', कहो: 'kaho', कहना: 'kehna', देना: 'dena', दीजिए: 'dijiye',
+  त्यांना: 'unhe', सांगा: 'bolo', सांग: 'bolo', તેમને: 'unhe', કહેજો: 'bolo', કહી: 'keh', દેજો: 'dena', જણાવજો: 'batao',
   एक: 'ek', दो: 'do', तीन: 'teen', चार: 'char', पांच: 'paanch', पाँच: 'paanch', छह: 'chhe', छः: 'chhe', छ: 'chhe', सात: 'saat', आठ: 'aath', नौ: 'nau', दस: 'das', ग्यारह: 'gyarah', बारह: 'barah',
   साढ़े: 'sadhe', साढे: 'sadhe', सवा: 'sava', पौने: 'paune', डेढ़: 'dedh', ढाई: 'dhai',
   // Gujarati
@@ -262,6 +265,16 @@ export function parseWhen(text, { now = new Date(), timeZone = 'Asia/Kolkata' } 
       take(m);
     }
   }
+  // A bare hour right after a day word: "tomorrow 3", "kal 5", "monday 11", "tonight 8". Same am/pm guess as "5 baje".
+  // Not a date ("tomorrow 12/11", "monday 3rd") and not a count ("tomorrow 3 people").
+  if (hour == null && (m = /\b(?:today|tonight|tomorrow|tmrw|tomm?orow|tommorrow|kal|aaj|parso|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+(?:at\s+)?(\d{1,2})(?:[:.]([0-5]\d))?\b(?!\s*(?:st|nd|rd|th|\/|-|%|\d|people|persons?|guys|friends|items?|days?|hours?|hrs?|mins?|minutes?|km|rs|rupees|times|more))/.exec(t)) && !new RegExp(`^\\s*(?:of\\s+)?(?:${MONTH_RE})\\b`).test(t.slice(m.index + m[0].length))) {
+    const h = +m[1];
+    if (h >= 1 && h <= 23) {
+      minute = m[2] ? +m[2] : 0;
+      hour = (h <= 6 && !MORNING.test(t)) || (h < 12 && EVENING.test(t) && !MORNING.test(t)) ? h + 12 : h;
+      take(m);
+    }
+  }
   if (hour == null && !day) {
     // "in 2 hours", "after 30 min", "2 ghante baad", "3 din mein": relative to now
     const rel = /\b(?:in|after|within)\s+(\d{1,3}|an?|one|two|three|four|five|six|seven|eight|nine|ten)\s*(minutes?|mins?|hours?|hrs?|days?|weeks?)\b|\b(\d{1,3})\s*(minutes?|mins?|ghante|ghanta|hours?|hrs?|din|dino|hafte|weeks?)\s*(?:baad|bad|mein|me)\b/.exec(t);
@@ -368,6 +381,45 @@ export function isMeetingRequest(text) {
   if (TEXT_TASK.test(String(text ?? ''))) return false;
   const s = normalizeTimeText(text);
   return (MEET.test(s) && (STRONG_TIME.test(s) || ASK.test(s))) || (STRONG_TIME.test(s) && (ASK.test(s) || DIRECT_ASK.test(s))) || (MEET.test(s) && DIRECT_ASK.test(s));
+}
+
+// "remind him", "tell Sumit …", "let him know", "pass it on", "unhe bol dena", "usse bolo": the sender wants the
+// owner to hear something. The twin cannot act on it, but it can say it was noted and will be passed on.
+const PASS_VERBS = 'remind|tell|inform|notify|message|text|ping|ask|convey';
+const HINGLISH_PASS = /\b(?:unhe|unko|usse|usko|unse)\s+(?:bol|bolo|bolna|bata|batao|batana|keh|kaho|kehna|kahna|message|msg|sandesh|yaad)\b|\b(?:bol|bata|keh)\s+(?:dena|do|dijiye|dijiyega)\s+(?:ki|unhe|usse)\b|\bmessage\s+(?:de\s+dena|dena|pahucha\w*)\b/;
+const PASS_IT_ON = /\bpass\s+(?:it|this|that|the message|my message|on)\s*(?:on|along|over|to)?\b|\bforward\s+(?:it|this|that)\s+to\b|\bgive\s+(?:him|her|them)\s+(?:a\s+|my\s+)?(?:message|msg|note)\b|\bconvey\b.*\b(?:to|him|her)\b|\blet\s+(?:him|her|them)\s+know\b/;
+const passOnRes = new Map();
+function passOnRe(names) {
+  const key = names.join('|');
+  let re = passOnRes.get(key);
+  if (!re) {
+    const who = ['him', 'her', 'them', 'the owner', ...names.filter((n) => /^[\p{L}][\p{L} .'-]{1,30}$/u.test(n)).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))].join('|');
+    re = new RegExp(`\\b(${PASS_VERBS})\\s+(?:${who})\\b|\\b(?:${who})\\s+ko\\s+(?:bol|bata|keh|message|msg)`, 'g');
+    passOnRes.set(key, re);
+  }
+  return re;
+}
+
+/**
+ * Does the sender ask us to tell/remind/inform the owner of something? Pure.
+ * @param {string} text
+ * @param {{ ownerNames?: string[] }} [opts] the owner's name and aliases (lower-case ok)
+ */
+export function isPassOnRequest(text, { ownerNames = [] } = {}) {
+  if (TEXT_TASK.test(String(text ?? ''))) return false;
+  const s = normalizeTimeText(text);
+  if (s.length < 4 || s.length > 600) return false;
+  if (HINGLISH_PASS.test(s) || PASS_IT_ON.test(s)) return true;
+  const re = passOnRe(ownerNames.map((n) => String(n).toLowerCase().trim()).filter(Boolean));
+  re.lastIndex = 0;
+  let m;
+  while ((m = re.exec(s))) {
+    // "I'll tell him", "i can ask him": the sender is the one who will do it
+    const before = s.slice(Math.max(0, m.index - 14), m.index);
+    if (/\bi(?:['’]ll|\s*will|\s*shall|\s*can|\s*would|\s*might|\s*am going to|['’]m going to)?\s*$/.test(before)) continue;
+    return true;
+  }
+  return false;
 }
 
 /** The text talks about meeting/calling/eating together (no time needed). */

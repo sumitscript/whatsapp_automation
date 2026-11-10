@@ -29,6 +29,7 @@ const KIND_LABEL = {
 const TEXT = {
   en: {
     ack: "Got it {name}! 📅 {what}: {when}{place}\nI can't confirm anything for {owner} myself, so I've noted it and will pass it to the real {owner}. {owner} will confirm soon ✅",
+    passOn: "Noted {name}! I can't act on this myself, so I'll pass it on to the real {owner}. {owner} will see it soon ✅",
     ask: "Noted {name}! Which day, time and place did you have in mind? I'll pass it to the real {owner} to confirm.",
     confirmHead: '✅ Confirmed, {name}! {owner} has accepted: {title}',
     confirmTail: 'See you then 🙂',
@@ -36,6 +37,7 @@ const TEXT = {
   },
   hl: {
     ack: 'Theek hai {name}! 📅 {what}: {when}{place}\nIse note kar liya hai aur asli {owner} tak pahuncha diya jayega. {owner} khud confirm karenge ✅',
+    passOn: 'Note kar liya {name}! Yeh baat asli {owner} tak pahuncha di jayegi. {owner} jald dekh lenge ✅',
     ask: 'Note kar liya {name}! Kis din, kitne baje aur kahan milna hai? Asli {owner} tak pahuncha diya jayega, {owner} confirm karenge.',
     confirmHead: '✅ Confirm ho gaya, {name}! {owner} ne haan kar di hai: {title}',
     confirmTail: 'Milte hain 🙂',
@@ -43,6 +45,7 @@ const TEXT = {
   },
   hi: {
     ack: 'ठीक है {name}! 📅 {what}: {when}{place}\nइसे नोट कर लिया है और असली {owner} तक पहुँचा दिया जाएगा। {owner} खुद पुष्टि करेंगे ✅',
+    passOn: 'नोट कर लिया {name}! यह बात असली {owner} तक पहुँचा दी जाएगी। {owner} जल्द देख लेंगे ✅',
     ask: 'नोट कर लिया {name}! किस दिन, कितने बजे और कहाँ मिलना है? असली {owner} तक पहुँचा दिया जाएगा, {owner} पुष्टि करेंगे।',
     confirmHead: '✅ पक्का, {name}! {owner} ने मंज़ूरी दे दी है: {title}',
     confirmTail: 'तब मिलते हैं 🙂',
@@ -50,6 +53,7 @@ const TEXT = {
   },
   mr: {
     ack: 'ठीक आहे {name}! 📅 {what}: {when}{place}\nहे नोंदवून घेतले आहे आणि खऱ्या {owner} पर्यंत पोहोचवले जाईल. {owner} स्वतः कळवतील ✅',
+    passOn: 'नोंदवून घेतले {name}! हे खऱ्या {owner} पर्यंत पोहोचवले जाईल. {owner} लवकरच पाहतील ✅',
     ask: 'नोंदवून घेतले {name}! कोणत्या दिवशी, किती वाजता आणि कुठे भेटायचे? खऱ्या {owner} पर्यंत पोहोचवले जाईल, {owner} कळवतील.',
     confirmHead: '✅ निश्चित, {name}! {owner} यांनी मान्य केले आहे: {title}',
     confirmTail: 'तेव्हा भेटू 🙂',
@@ -57,6 +61,7 @@ const TEXT = {
   },
   gu: {
     ack: 'ઠીક છે {name}! 📅 {what}: {when}{place}\nઆ નોંધી લીધું છે અને સાચા {owner} સુધી પહોંચાડવામાં આવશે. {owner} પોતે જણાવશે ✅',
+    passOn: 'નોંધી લીધું {name}! આ વાત સાચા {owner} સુધી પહોંચાડવામાં આવશે. {owner} જલ્દી જોશે ✅',
     ask: 'નોંધી લીધું {name}! કયા દિવસે, કેટલા વાગ્યે અને ક્યાં મળવું છે? સાચા {owner} સુધી પહોંચાડીશું, {owner} જણાવશે.',
     confirmHead: '✅ પાક્કું, {name}! {owner} એ મંજૂરી આપી છે: {title}',
     confirmTail: 'ત્યારે મળીએ 🙂',
@@ -100,6 +105,12 @@ export function meetingAck(p) {
   const { fam, v } = vars(p);
   const known = p.dueAt && !p.allDay;
   return fill(TEXT[fam][known ? 'ack' : 'ask'], v);
+}
+
+/** Reply to "tell him / remind him / pass it on": noted and passed on, never agreeing or committing for the owner. */
+export function passOnAck(p) {
+  const { fam, v } = vars(p);
+  return fill(TEXT[fam].passOn, v);
 }
 
 /** Message that goes with the invitation card (or alone) when the owner accepts. */

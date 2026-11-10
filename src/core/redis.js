@@ -22,6 +22,7 @@ export const channels = Object.freeze({
   logs: `${P}ch:logs`,
   settings: `${P}ch:settings`,
   kb: `${P}ch:kb`,
+  llmKeys: `${P}ch:llmkeys`,
 });
 
 export function createRedis(name = 'main') {

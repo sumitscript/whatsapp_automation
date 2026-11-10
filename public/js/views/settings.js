@@ -1,7 +1,7 @@
 // Settings, model management, playground and password change.
 import { api } from '../api.js';
 import { icons } from '../icons.js';
-import { $, confirmDialog, escapeHtml, formatBytes, formatMs, formatWhatsApp, html, raw, toast } from '../util.js';
+import { $, confirmDialog, escapeHtml, formatBytes, formatMs, formatNumber, formatWhatsApp, html, raw, toast } from '../util.js';
 
 const TIER_LABEL = { fast: 'Fast', balanced: 'Balanced', quality: 'Quality' };
 
@@ -95,6 +95,28 @@ export async function mount(root, { hub }) {
         </section>
 
         <div class="settings-col">
+        <section class="card" id="groq-card">
+          <h2 class="card-title">AI provider</h2>
+          <p class="muted small" id="gq-summary">Loading…</p>
+          <form id="gq-form" class="stack">
+            <div class="radio-cards">
+              <label class="radio-card"><input type="radio" name="llmProvider" value="ollama" /><span><strong>Local model</strong><small>Runs on this server's CPU. Private, but slower</small></span></label>
+              <label class="radio-card"><input type="radio" name="llmProvider" value="groq" /><span><strong>Groq</strong><small>Hosted and very fast. Your API keys are used in turn</small></span></label>
+            </div>
+            <label class="field"><span>Groq model</span><input name="groqModel" list="gq-models" placeholder="llama-3.3-70b-versatile" autocomplete="off" /><datalist id="gq-models"></datalist></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="groqFallback" /><span>Fall back to the local model<small class="muted"> — when every Groq key is rate-limited or Groq is down</small></span></label>
+            <div class="form-actions"><button class="btn btn-primary" type="submit">${raw(icons.save)} Save provider</button></div>
+          </form>
+          <h3 class="section-title">Groq API keys</h3>
+          <div id="gq-keys" class="table-scroll"></div>
+          <form id="gq-add" class="inline-form">
+            <input name="label" placeholder="Label (optional)" aria-label="Key label" maxlength="60" />
+            <input name="key" type="password" placeholder="gsk_…" autocomplete="off" aria-label="Groq API key" required />
+            <button class="btn btn-ghost" type="submit">${raw(icons.plus)} Add key</button>
+          </form>
+          <p class="muted small">Keys are stored encrypted on the server and never shown again. When one key hits its rate limit the next one takes over instantly; when all are used up, the local model answers. Keys set in the server's <code class="wa-inline">GROQ_API_KEYS</code> are listed here read-only.</p>
+        </section>
+
         <section class="card">
           <div class="card-title-row">
             <h2 class="card-title">AI model</h2>
@@ -320,6 +342,112 @@ export async function mount(root, { hub }) {
     }
   });
 
+  // ---------- Groq provider + keys ----------
+  const gq = { data: null, timer: null, modelsLoaded: false };
+  const gqForm = $('#gq-form', root);
+  const cooldownText = (ms) => (ms >= 90_000 ? `${Math.ceil(ms / 60_000)} min` : `${Math.ceil(ms / 1000)} s`);
+
+  function renderGroq() {
+    const d = gq.data;
+    if (!d) return;
+    if (!gqForm.contains(document.activeElement)) {
+      Array.from(gqForm.elements.llmProvider).forEach((r) => (r.checked = r.value === d.provider));
+      gqForm.elements.groqModel.value = d.model || '';
+      gqForm.elements.groqFallback.checked = !!d.fallback;
+    }
+    const ready = d.keys.filter((k) => k.state === 'ready').length;
+    const c = d.counters;
+    const served = c ? html` <span class="muted">Served: ${c.groq} Groq · ${c.local} local${c.fallbacks ? ` · ${c.fallbacks} fell back` : ''}.</span>` : '';
+    $('#gq-summary', root).innerHTML =
+      d.provider === 'groq'
+        ? html`Answering with <strong>Groq</strong> (${d.model}). ${d.keys.length ? `${ready} of ${d.keys.length} key${d.keys.length === 1 ? '' : 's'} ready.` : 'No key added yet, so the local model is answering.'}${raw(served)}`
+        : html`Answering with the <strong>local model</strong>. Switch to Groq for much faster replies.`;
+    const rows = d.keys.map((k) => {
+      const pill =
+        k.state === 'ready'
+          ? html`<span class="badge badge-ok">Ready</span>`
+          : k.state === 'cooling'
+            ? html`<span class="badge badge-warn">Rate-limited · ${cooldownText(k.cooldownMs)}</span>`
+            : html`<span class="badge badge-bad">Rejected</span>`;
+      const used = `${formatNumber(k.requests)} calls${k.limited ? ` · ${k.limited} limited` : ''}`;
+      const remove = k.source === 'console' ? html` <button class="btn btn-ghost btn-sm agenda-del" data-act="remove" data-id="${k.id}" data-label="${k.label}">Remove</button>` : '';
+      const why = k.lastError && k.state !== 'ready' ? html`<div class="muted small">${k.lastError}</div>` : '';
+      return html`<tr><td><strong>${k.label}</strong><div class="muted small">${k.hint} · ${k.source === 'env' ? 'server env' : 'console'}</div></td><td>${raw(pill)}${raw(why)}</td><td class="muted small">${used}</td><td class="actions"><button class="btn btn-ghost btn-sm" data-act="test" data-id="${k.id}">Test</button>${raw(remove)}</td></tr>`;
+    });
+    $('#gq-keys', root).innerHTML = rows.length
+      ? html`<table class="table"><thead><tr><th>Key</th><th>Status</th><th>Usage</th><th></th></tr></thead><tbody>${raw(rows.join(''))}</tbody></table>`
+      : html`<p class="muted small">No keys yet. Add your Groq API key below (you can add several).</p>`;
+    if (d.unreadable) $('#gq-keys', root).insertAdjacentHTML('beforeend', html`<p class="muted small">${d.unreadable} saved key(s) cannot be read (the server secret changed). Add them again.</p>`);
+  }
+  async function loadGroq() {
+    try {
+      gq.data = await api.groqStatus();
+      renderGroq();
+      if (!gq.modelsLoaded && gq.data.keys.length) {
+        gq.modelsLoaded = true;
+        api
+          .groqModels()
+          .then(({ models }) => {
+            $('#gq-models', root).innerHTML = models.map((m) => html`<option value="${m}"></option>`).join('');
+          })
+          .catch(() => {});
+      }
+    } catch (e) {
+      $('#gq-summary', root).textContent = `Could not load the Groq status: ${e.message}`;
+    }
+  }
+  gqForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = { llmProvider: gqForm.elements.llmProvider.value, groqModel: gqForm.elements.groqModel.value.trim() || 'llama-3.3-70b-versatile', groqFallback: gqForm.elements.groqFallback.checked };
+    try {
+      await api.saveSettings(body);
+      toast(body.llmProvider === 'groq' && !gq.data?.keys.length ? 'Saved. Add a Groq key: until then the local model answers' : 'AI provider saved', 'success');
+      await loadGroq();
+    } catch (ex) {
+      toast(ex.message || 'Could not save', 'error');
+    }
+  });
+  $('#gq-add', root).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      const r = await api.groqAddKey(f.label.value.trim(), f.key.value.trim());
+      toast(`Key added (${r.models} models available)`, 'success');
+      f.reset();
+      await loadGroq();
+    } catch (ex) {
+      toast(ex.message || 'Could not add the key', 'error');
+    }
+  });
+  $('#gq-keys', root).addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-act]');
+    if (!b) return;
+    const id = b.dataset.id;
+    if (b.dataset.act === 'test') {
+      b.disabled = true;
+      try {
+        const r = await api.groqTest(id);
+        toast(r.ok ? `Key works (${r.ms} ms, ${r.models} models)` : r.error || 'The key did not work', r.ok ? 'success' : 'error');
+      } catch (ex) {
+        toast(ex.message, 'error');
+      } finally {
+        b.disabled = false;
+      }
+    } else if (b.dataset.act === 'remove') {
+      const ok = await confirmDialog({ title: 'Remove this key?', message: `“${b.dataset.label}” will be deleted from the server. Other keys keep working.`, confirmText: 'Remove', danger: true });
+      if (!ok) return;
+      try {
+        await api.groqDeleteKey(String(id).replace(/^db:/, ''));
+        toast('Key removed', 'success');
+        await loadGroq();
+      } catch (ex) {
+        toast(ex.message, 'error');
+      }
+    }
+  });
+  loadGroq();
+  gq.timer = setInterval(loadGroq, 5000); // live key status: who is cooling, who is ready
+
   const offs = [
     hub.on('model:pull', (p) => {
       if (!p?.name) return;
@@ -423,5 +551,10 @@ export async function mount(root, { hub }) {
   }
   loadModels();
 
-  return { destroy: () => offs.forEach((o) => o()) };
+  return {
+    destroy: () => {
+      clearInterval(gq.timer);
+      offs.forEach((o) => o());
+    },
+  };
 }

@@ -120,6 +120,42 @@ export class Semaphore {
 }
 
 /**
+ * Remembers recently seen keys (message ids) so a repeated event is recognised. Entries expire after `ttlMs`
+ * and the set never holds more than `max` keys (oldest evicted first). `seen(key)` returns true when the key
+ * was already seen within the ttl, and records it otherwise.
+ */
+export class SeenIds {
+  constructor({ ttlMs = 10 * 60_000, max = 2000, now = () => Date.now() } = {}) {
+    this.ttlMs = ttlMs;
+    this.max = max;
+    this.now = now;
+    this.map = new Map(); // key → seenAt (insertion order = age order)
+  }
+  seen(key) {
+    const t = this.now();
+    const at = this.map.get(key);
+    if (at !== undefined && t - at < this.ttlMs) return true;
+    this.map.delete(key); // expired entry: re-insert at the end
+    this.map.set(key, t);
+    while (this.map.size > this.max) this.map.delete(this.map.keys().next().value);
+    return false;
+  }
+  /** Record a key without testing it (e.g. an id we just sent). */
+  add(key) {
+    this.map.delete(key);
+    this.map.set(key, this.now());
+    while (this.map.size > this.max) this.map.delete(this.map.keys().next().value);
+  }
+  has(key) {
+    const at = this.map.get(key);
+    return at !== undefined && this.now() - at < this.ttlMs;
+  }
+  get size() {
+    return this.map.size;
+  }
+}
+
+/**
  * Delete every Redis key matching a glob (SCAN + UNLINK in batches, never KEYS, so it is safe on a live server).
  * `redis` is an ioredis-like client (scanStream, unlink). Returns how many keys were removed.
  */

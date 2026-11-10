@@ -234,3 +234,11 @@ docker compose exec worker node scripts/eval.js --model gemma3:4b,llama3.2:3b
 ```
 
 Run it from a checkout (with `npm run eval -- --model gemma3:4b`, `OLLAMA_URL` pointing at the server's Ollama) if you prefer. Options: `--only <id-substring>`, `--json out.json`, `--temperature N`. Models must already be installed. The exit code is 1 if any check fails. Run it before switching `LLM_MODEL` or after editing the persona, and note it competes for CPU with live traffic, so prefer a quiet moment.
+
+## Groq (optional hosted LLM, several keys)
+
+1. Create one or more API keys at console.groq.com (a separate key per account/project gives separate rate limits).
+2. Either put them in the server `.env` (`GROQ_API_KEYS=gsk_a,gsk_b`, then `docker compose up -d`), or add them in the console under **Settings → AI provider → Groq API keys** (stored encrypted; the console verifies each key before saving).
+3. In the same card choose **Groq**, pick a model (e.g. `llama-3.3-70b-versatile`, or `llama-3.1-8b-instant` for the highest limits) and save. It applies to the next message.
+
+Behaviour: keys are used in turn; when one reports a rate limit the next key serves the same request immediately; when every key is rate-limited or Groq is unreachable the local Ollama model answers (turn this off with "Fall back to the local model"). Keep the local model installed: it is the fallback and also does memory summaries and agenda extraction. Stored keys are encrypted with a key derived from `JWT_SECRET`; if you rotate `JWT_SECRET`, add the console keys again. The Settings card shows each key's live state (ready, rate-limited with a countdown, rejected) and how many calls each served.

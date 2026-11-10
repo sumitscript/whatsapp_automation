@@ -7,6 +7,8 @@ import { channels, keys, recentLogs, withinRate } from '../core/redis.js';
 import { catalogWithInstalled } from '../llm/catalog.js';
 import { deriveLlmState } from '../llm/status.js';
 import { replyLanguage } from '../brain/lang.js';
+import { encryptSecret, maskKey } from '../core/secrets.js';
+import { GroqClient } from '../llm/groq.js';
 import { localParts, looksLikeCommitmentInContext, sanitizeAgendaInput, summarizeAgenda, zonedToUtc } from '../brain/agenda.js';
 
 const CHAT_ID = /^[\w.\-:@]{3,120}$/;
@@ -219,6 +221,76 @@ export function createApp(deps) {
   });
   // Live LLM health: Ollama itself (reachable? model installed/resident?) + the worker's heartbeat.
   api.get('/llm/status', async (_req, res) => res.json(await probeLlm()));
+
+  // ---------- Groq (hosted LLM) keys ----------
+  // Keys come from GROQ_API_KEYS (read-only here) and from the console (stored encrypted). The worker owns the live
+  // rate-limit state of each key; this merges its heartbeat over the key list so the console shows what really happens.
+  const groqDeps = deps.groq;
+  const GROQ_KEY = /^[w-]{20,200}$/;
+  const keyChanged = async () => {
+    await groqDeps.store.onChange();
+    await redis.publish(channels.llmKeys, String(Date.now()));
+  };
+  api.get('/llm/groq', async (_req, res) => {
+    let worker = null;
+    try {
+      worker = JSON.parse((await redis.get(keys.workerStatus)) || 'null')?.llm || null;
+    } catch {
+      /* corrupt heartbeat: show this process's view */
+    }
+    const live = new Map((worker?.keys || []).map((k) => [k.id, k]));
+    const s = settings.get();
+    res.json({
+      provider: s.llmProvider,
+      model: s.groqModel,
+      fallback: s.groqFallback,
+      envKeys: groqDeps.pool.status().filter((k) => k.source === 'env').length,
+      keys: groqDeps.pool.status().map((k) => ({ ...k, ...(live.get(k.id) ? { ...live.get(k.id), label: k.label, hint: k.hint, source: k.source } : {}) })),
+      counters: worker?.counters ?? null,
+      lastFallback: worker?.lastFallback ?? null,
+      groqReady: worker?.groqReady ?? groqDeps.pool.hasAvailable(),
+      workerSeen: !!worker,
+      unreadable: groqDeps.store.unreadable,
+    });
+  });
+  api.post('/llm/groq/keys', async (req, res) => {
+    const key = String(req.body?.key || '').trim();
+    const label = String(req.body?.label || '').trim().slice(0, 60);
+    if (!GROQ_KEY.test(key)) throw httpError(400, 'That does not look like a Groq API key (it starts with gsk_ and has no spaces)');
+    if (groqDeps.pool.status().some((k) => groqDeps.pool.secretOf(k.id) === key)) throw httpError(409, 'That key is already added');
+    const check = await GroqClient.probe(key, { baseUrl: config.groq.baseUrl });
+    if (!check.ok) throw httpError(400, check.error || 'Groq did not accept this key');
+    const row = await repo.addLlmKey({ label: label || `key ${groqDeps.pool.size + 1}`, keyEnc: encryptSecret(key, config.auth.jwtSecret), hint: maskKey(key) });
+    audit(req, 'llm.key.add', { id: row.id, label: row.label });
+    await keyChanged();
+    res.json({ ok: true, key: { id: `db:${row.id}`, label: row.label, hint: row.hint, source: 'console' }, models: check.models?.length ?? 0 });
+  });
+  api.delete('/llm/groq/keys/:id', async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) throw httpError(400, 'Invalid id');
+    if (!(await repo.deleteLlmKey(id))) throw httpError(404, 'Key not found (keys from the GROQ_API_KEYS environment variable are removed in the server .env)');
+    audit(req, 'llm.key.delete', { id });
+    await keyChanged();
+    res.json({ ok: true });
+  });
+  api.post('/llm/groq/test', async (req, res) => {
+    const id = req.body?.id ? String(req.body.id) : null;
+    const secret = id ? groqDeps.pool.secretOf(id) : String(req.body?.key || '').trim();
+    if (!secret) throw httpError(404, 'Key not found');
+    const r = await GroqClient.probe(secret, { baseUrl: config.groq.baseUrl });
+    res.json({ ok: r.ok, ms: r.ms, status: r.status, models: r.models?.length ?? 0, error: r.error ?? null });
+  });
+  let groqModels = { at: 0, list: [] };
+  api.get('/llm/groq/models', async (_req, res) => {
+    if (Date.now() - groqModels.at > 10 * 60_000 || !groqModels.list.length) {
+      try {
+        groqModels = { at: Date.now(), list: await groqDeps.client.listModels() };
+      } catch (err) {
+        throw httpError(502, `Could not list Groq models: ${err.message}`);
+      }
+    }
+    res.json({ models: groqModels.list });
+  });
   const pulling = new Set();
   api.post('/models/pull', async (req, res) => {
     const name = String(req.body?.name || '');
@@ -407,8 +479,11 @@ export function createApp(deps) {
       if (typeof wantModel !== 'string' || !/^[\w.\-/:]{1,100}$/.test(wantModel)) throw httpError(400, 'Invalid model name');
       const installed = await llm.listModels().catch(() => []);
       if (!installed.some((m) => m.name === wantModel)) throw httpError(400, `Model "${wantModel}" is not installed`);
-      s = { ...s, model: wantModel };
+      s = { ...s, model: wantModel, llmProvider: 'ollama' }; // asking for a specific local model means testing that model
     }
+    // Optional: try the hosted route from the playground without changing the live setting.
+    if (req.body?.provider === 'groq' || req.body?.provider === 'ollama') s = { ...s, llmProvider: req.body.provider };
+    if (typeof req.body?.groqModel === 'string' && /^[w.-/:]{1,100}$/.test(req.body.groqModel)) s = { ...s, groqModel: req.body.groqModel };
     return s;
   };
   const playgroundHistory = (req) =>

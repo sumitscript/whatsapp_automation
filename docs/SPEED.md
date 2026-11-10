@@ -40,6 +40,10 @@ Setting: `prefillAhead` (Settings → Think ahead). The worker also pre-reads th
 - **One reply per burst** (`core/coalesce.js`): queued jobs of a chat fold into the newest; a generation that has not spoken yet is aborted and re-run with the new text. Debounce is therefore short (400 ms).
 - **Idle timeout.** `LLM_TIMEOUT_MS` is "no data for N seconds" for streamed replies (restarted on every chunk), not a cap on the whole reply, so long stories are no longer cut off. A model that is not ready within `WORKER_MODEL_WAIT_MS` (20 s) fails the job with a notice instead of parking every chat.
 
+## Hosted option: Groq with several keys
+
+Set the provider to Groq in Settings (and add one or more API keys). Replies then come from Groq (about a second instead of 5 to 40 seconds on the CPU box) and the CPU stays free. Each key has its own rate limits; the router uses them in turn, switches to the next key the instant one is limited, and falls back to the local model only when every key is used up. Think-ahead is not used on this route, and background memory/agenda work stays on the local model so it never costs Groq quota. See `src/llm/router.js`.
+
 ## Measured effect of think-ahead
 
 Prompt-reading time of the real reply, neutral messages (no knowledge-base lookups), 3 repetitions each:

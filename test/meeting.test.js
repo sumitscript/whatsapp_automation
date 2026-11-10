@@ -204,3 +204,82 @@ test('pipeline: questions about plans and ordinary chat still go to the model; t
   assert.equal((await replyTo('how does a closure work in javascript')).calls.length, 1);
   assert.equal((await replyTo("let's meet tomorrow at 5pm", { settingsOver: { meetingAck: false } })).calls.length, 1);
 });
+
+// ---------------------------------------------- bare hour after a day word, pass-on, and wider intent gating
+
+import { isPassOnRequest } from '../src/brain/agenda.js';
+import { passOnAck } from '../src/brain/invite.js';
+
+test('a bare hour right after a day word is a time; dates and counts are not', () => {
+  assert.equal(at('tomorrow 3').when, 'Wed, 11 Nov, 3:00 pm');
+  assert.equal(at('I want to meet mehul urgently tomorrow 3').when, 'Wed, 11 Nov, 3:00 pm');
+  assert.equal(at('kal 5 milte hain').when, 'Wed, 11 Nov, 5:00 pm');
+  assert.equal(at('tonight 8').when, 'Tue, 10 Nov, 8:00 pm');
+  assert.equal(at('tomorrow 11').when, 'Wed, 11 Nov, 11:00 am');
+  // not times
+  for (const t of ['tomorrow 12/11', 'monday 3rd', 'tomorrow 3 people', 'tomorrow 15 nov', 'friday 2 days']) {
+    const r = at(t);
+    assert.equal(r.allDay, true, `${t} must stay date-only`);
+  }
+  assert.equal(at('tomorrow 3 pm').when, 'Wed, 11 Nov, 3:00 pm', 'explicit am/pm still wins');
+});
+
+test('pass-on requests in English, Hinglish and Devanagari', () => {
+  const names = ['sumit', 'soni'];
+  for (const t of [
+    'I have a client meeting and I want to join.So remind him',
+    'please tell him I called',
+    'tell Sumit the file is ready',
+    'let him know I am waiting',
+    'can you inform sumit about the invoice',
+    'ask him to call me back',
+    'pass it on to him please',
+    'unhe bol dena ki main aaya tha',
+    'usse bolo mujhe call kare',
+    'sumit ko bata dena',
+    'उन्हें बोल देना कि मैं आया था',
+  ]) assert.equal(isPassOnRequest(t, { ownerNames: names }), true, t);
+  for (const t of ['I will tell him myself', "i'll ask him tomorrow", 'what is the capital of France', 'summarize this: tell him to leave', 'hello?', 'how are you']) {
+    assert.equal(isPassOnRequest(t, { ownerNames: names }), false, t);
+  }
+});
+
+test('pass-on reply: noted, passed on, nothing promised, in their language', () => {
+  const p = { name: 'Prachi Shah', owner: 'Sumit Soni' };
+  const en = passOnAck({ ...p, code: 'en' });
+  assert.match(en, /^Noted Prachi!/);
+  assert.match(en, /pass it on to the real Sumit/);
+  assert.doesNotMatch(en, /\b(sure|will do|confirmed|yes)\b/i);
+  assert.match(passOnAck({ ...p, code: 'hi-Latn' }), /asli Sumit tak pahuncha di jayegi/);
+  assert.match(passOnAck({ ...p, code: 'hi' }), /असली Sumit/);
+  assert.match(passOnAck({ ...p, code: 'mr' }), /खऱ्या Sumit/);
+  assert.match(passOnAck({ ...p, code: 'gu' }), /સાચા Sumit/);
+});
+
+test('pipeline: naming the owner (about_owner) or opening with "Hello?" still gets the meeting template', async () => {
+  const mehul = { ownerName: 'Mehul Gosavi', ownerAliases: 'mehul' };
+  const a = await replyTo('I want to meet mehul urgently tomorrow 3', { settingsOver: mehul });
+  assert.equal(a.calls.length, 0);
+  assert.equal(a.done.meta.intent, 'meeting');
+  assert.match(a.chunks[0], /Wed, 11 Nov|3:00 pm/);
+  assert.match(a.chunks[0], /real Mehul/);
+  const b = await replyTo('I want to meet Sumit we have a client meeting today at 8 pm');
+  assert.equal(b.calls.length, 0);
+  assert.match(b.chunks[0], /8:00 pm/);
+  const c = await replyTo('Hello?\nI want to meet him tomorrow 3 pm\nHello?');
+  assert.equal(c.calls.length, 0);
+  assert.match(c.chunks[0], /3:00 pm/);
+});
+
+test('pipeline: "remind him" gets the pass-on template; coding and ordinary chat still reach the model', async () => {
+  const r = await replyTo('I have a client meeting and I want to join.So remind him');
+  assert.equal(r.calls.length, 0);
+  assert.equal(r.done.meta.intent, 'pass_on');
+  assert.match(r.chunks[0], /^Noted Prachi!/);
+  const hi = await replyTo('unhe bol dena ki main aaya tha');
+  assert.equal(hi.calls.length, 0);
+  assert.match(hi.chunks[0], /asli Sumit/);
+  assert.equal((await replyTo("I'll tell him myself")).calls.length, 1);
+  assert.equal((await replyTo('write a python function to reverse a string')).calls.length, 1);
+  assert.equal((await replyTo('remind him', { settingsOver: { meetingAck: false } })).calls.length, 1, 'switched off with meetingAck');
+});

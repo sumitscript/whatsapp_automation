@@ -343,6 +343,19 @@ export function createRepo(pool) {
       return (await q('DELETE FROM agenda_items WHERE id = $1', [id])).rowCount > 0;
     },
 
+    // ---------- LLM provider keys (encrypted at rest) ----------
+    async listLlmKeys(provider = 'groq') {
+      const { rows } = await q('SELECT id, label, key_enc, hint, created_at FROM llm_keys WHERE provider = $1 ORDER BY id', [provider]);
+      return rows.map((r) => ({ id: Number(r.id), label: r.label, keyEnc: r.key_enc, hint: r.hint, createdAt: r.created_at }));
+    },
+    async addLlmKey({ provider = 'groq', label, keyEnc, hint }) {
+      const { rows } = await q('INSERT INTO llm_keys (provider, label, key_enc, hint) VALUES ($1,$2,$3,$4) RETURNING id, label, hint, created_at', [provider, label, keyEnc, hint]);
+      return { id: Number(rows[0].id), label: rows[0].label, hint: rows[0].hint, createdAt: rows[0].created_at };
+    },
+    async deleteLlmKey(id) {
+      return (await q('DELETE FROM llm_keys WHERE id = $1', [id])).rowCount > 0;
+    },
+
     // ---------- wipe ----------
     /** Delete every chat: contacts (with their AI memory notes and block flags), messages, sessions and agenda items. Keeps users, settings and the audit log. */
     async wipeChatData() {

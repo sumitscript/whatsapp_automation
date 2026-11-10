@@ -13,6 +13,10 @@ import { createRepo } from '../db/repo.js';
 import { createBus, TOPICS } from '../bus/index.js';
 import { KnowledgeBase } from '../rag/kb.js';
 import { OllamaClient } from '../llm/ollama.js';
+import { KeyPool } from '../llm/key-pool.js';
+import { KeyStore } from '../llm/key-store.js';
+import { GroqClient } from '../llm/groq.js';
+import { RoutedLlm } from '../llm/router.js';
 import { createBrain } from '../brain/pipeline.js';
 import { looksLikeCommitmentInContext, sameItem } from '../brain/agenda.js';
 
@@ -40,25 +44,31 @@ sub.on('message', (ch) => {
 const llm = new OllamaClient({ ...config.ollama, url: config.ollama.url, timeoutMs: config.ollama.requestTimeoutMs, logger: log });
 const memory = createRedisMemory(redis);
 
-// The gate bounds parallel *model* calls, and nothing else. Template replies, answer-cache hits and
-// commands never touch the model, so they no longer queue behind someone else's 30-second story.
-// Waiting calls are served by priority: 1 normal reply, 2 long reply (story/code: big token budget),
-// 3 background (memory folds, agenda), 4 think-ahead; aging keeps long jobs from starving.
+// Groq: several API keys in a pool (env + console). A rate-limited key is skipped instantly; when all are exhausted
+// the call falls back to the local model. Which one serves a call is decided per call by the router (src/llm/router.js).
+const groqPool = new KeyPool();
+const keyStore = new KeyStore({ pool: groqPool, repo, secret: config.auth.jwtSecret, envKeys: config.groq.keys, logger: log });
+await keyStore.start();
+await sub.subscribe(channels.llmKeys);
+sub.on('message', (ch) => {
+  if (ch === channels.llmKeys) keyStore.onChange();
+});
+const groq = new GroqClient({ pool: groqPool, baseUrl: config.groq.baseUrl, timeoutMs: config.groq.timeoutMs, logger: log });
+
+// The gates bound parallel *model* calls, and nothing else. Template replies, answer-cache hits and
+// commands never touch the model, so they never queue behind someone else's 30-second story.
+// Local model: one at a time (CPU), served by priority: 1 normal reply, 2 long reply (story/code: big token
+// budget), 3 background (memory folds, agenda), 4 think-ahead; aging keeps long jobs from starving.
+// Groq: a wider gate (the hosted model is not CPU-bound).
 const gate = new Semaphore(config.ollama.concurrency);
-const llmGated = {
-  get numCtx() {
-    return llm.numCtx;
-  },
-  async *chat(req) {
-    await gate.acquire({ priority: req.priority ?? (req.maxTokens > 450 ? 2 : 1), signal: req.signal });
-    try {
-      yield* llm.chat(req);
-    } finally {
-      gate.release();
-    }
-  },
-  prefill: (req) => gate.run(() => llm.prefill(req), { priority: 4, signal: req.signal }),
-};
+const llmGated = new RoutedLlm({
+  ollama: llm,
+  groq,
+  getSettings: () => settings.get(),
+  gates: { ollama: gate, groq: new Semaphore(config.groq.concurrency) },
+  localReady: () => modelState.ready,
+  logger: log,
+});
 const brain = createBrain({ kb, llm: llmGated, memory, cache: createRedisAnswerCache(redis), logger: log });
 
 let modelState = { model: settings.get().model, ready: false, error: null };
@@ -107,7 +117,7 @@ const publishStatus = () =>
   redis
     .set(
       keys.workerStatus,
-      JSON.stringify({ at: Date.now(), startedAt, model: modelState, inFlight, lanes: lanes.size, folding, queuedFolds: foldQueue.size + agendaQueue.size, concurrency: config.ollama.concurrency, bus: bus.driver, kb: kb.version, lastReply, lastError }),
+      JSON.stringify({ at: Date.now(), startedAt, model: modelState, inFlight, lanes: lanes.size, folding, queuedFolds: foldQueue.size + agendaQueue.size, concurrency: config.ollama.concurrency, bus: bus.driver, kb: kb.version, lastReply, lastError, llm: llmGated.status() }),
       'EX',
       20,
     )
@@ -130,7 +140,7 @@ function cancelBg() {
 }
 async function warmChat(chatId) {
   const s = settings.get();
-  if (!s.prefillAhead || !modelState.ready || inFlight > 0 || !llm.reusesPrefix(s.model)) return;
+  if (!s.prefillAhead || !modelState.ready || inFlight > 0 || !llmGated.reusesPrefix(s.model)) return;
   cancelWarm();
   const ctl = (warmCtl = new AbortController());
   try {
@@ -154,8 +164,9 @@ async function handleJob(job) {
     return;
   }
   // Ollama down or the model still loading must not park every job (and the "typing…" indicator) forever.
-  const ready = await Promise.race([modelReady.then(() => true), sleep(MODEL_WAIT_MS).then(() => false)]);
-  if (!ready || !modelState.ready) {
+  // (With Groq selected and a key ready, a reply does not need the local model at all.)
+  const ready = llmGated.groqUsable() || (await Promise.race([modelReady.then(() => true), sleep(MODEL_WAIT_MS).then(() => false)]));
+  if (!ready || !(modelState.ready || llmGated.groqUsable())) {
     co.claim(job.chatId, job.jobId);
     co.release(job.chatId, job.jobId);
     log.warn('Model not ready; reply skipped', { chatId: job.chatId, model: modelState.model, error: modelState.error });

@@ -14,6 +14,7 @@ import { helpText, parseCommand } from '../brain/commands.js';
 import { TOPICS } from '../bus/index.js';
 import { formatWhen } from '../brain/agenda.js';
 import { replyLanguage } from '../brain/lang.js';
+import { EchoTracker } from '../core/echo.js';
 import { confirmationText, declineText, invitationData, invitationHtml } from '../brain/invite.js';
 
 const TEXT_TYPES = new Set(['chat', 'text']);
@@ -44,7 +45,7 @@ export class Inbox {
     this.jobs = new Map(); // jobId → job
     this.typing = new Map(); // chatId → { refs, interval, timeout }
     this.lanes = new KeyedQueue(); // per-chat ordered delivery
-    this.echo = new Map(); // `${chatId}|${body}` → count of messages we are sending (to ignore our own echoes)
+    this.echo = new EchoTracker(); // ignores the message_create echoes of what we send ourselves (by message id, then by text)
     this.lastErrorNotice = new Map();
     this.lastUnsupported = new Map();
 
@@ -224,7 +225,7 @@ export class Inbox {
   async wipeChatData() {
     for (const buf of this.pending.values()) clearTimeout(buf.timer);
     for (const chatId of [...this.typing.keys()]) this.#typingStop(chatId, true);
-    for (const m of [this.pending, this.recentOut, this.jobs, this.echo, this.lastErrorNotice, this.lastUnsupported]) m.clear();
+    for (const m of [this.pending, this.recentOut, this.jobs, this.echo, this.lastErrorNotice, this.lastUnsupported]) m.clear(); // EchoTracker has clear() too
     this.sessions.reset();
     const counts = await this.repo.wipeChatData();
     let redisKeys = 0;
@@ -251,10 +252,9 @@ export class Inbox {
   }
 
   async #sendImageSystem(chatId, png, caption, intent) {
-    const k = `${chatId}|${caption}`; // a media message's body is its caption: recognise the echo like any text
-    this.echo.set(k, (this.echo.get(k) || 0) + 1);
-    setTimeout(() => this.#forgetEcho(k), 30_000).unref();
+    this.echo.expect(chatId, caption); // a media message's body is its caption: recognise the echo like any text
     const sent = await this.wa.sendImage(chatId, png, { caption });
+    this.echo.sent(sent?.id?._serialized);
     const saved = await this.repo.insertMessage({ waMessageId: sent?.id?._serialized, chatId, direction: 'out', body: caption, type: 'image', isAi: true, sentBy: 'ai', intent, latencyMs: 0 });
     if (saved) this.#broadcastMessage(saved, chatId);
     await this.memory.append(chatId, [{ role: 'assistant', content: caption }]).catch(() => {});
@@ -412,16 +412,10 @@ export class Inbox {
 
   /** Send while remembering the body so the message_create echo is recognised as ours. */
   async #send(chatId, text, opts) {
-    const k = `${chatId}|${text}`;
-    this.echo.set(k, (this.echo.get(k) || 0) + 1);
-    setTimeout(() => this.#forgetEcho(k), 30_000).unref();
-    return this.wa.sendText(chatId, text, opts);
-  }
-
-  #forgetEcho(k) {
-    const n = (this.echo.get(k) || 0) - 1;
-    if (n > 0) this.echo.set(k, n);
-    else this.echo.delete(k);
+    this.echo.expect(chatId, text); // fallback for an echo that arrives before sendMessage resolves
+    const sent = await this.wa.sendText(chatId, text, opts);
+    this.echo.sent(sent?.id?._serialized); // exact: the echo of this very message id is ours
+    return sent;
   }
 
   // ---------------------------------------------------- owner / console sends
@@ -430,11 +424,8 @@ export class Inbox {
   async handleOwnMessage(msg) {
     const chatId = msg.to;
     if (!chatId || chatId === 'status@broadcast') return;
-    const k = `${chatId}|${msg.body}`;
-    if (this.echo.has(k)) {
-      this.#forgetEcho(k);
-      return; // our own AI/console message
-    }
+    // Our own AI/console message echoing back (by WhatsApp id, or by text if the event beat sendMessage): not the owner typing.
+    if (this.echo.isOurs(chatId, msg.body, msg.id?._serialized)) return;
     if (!(await this.repo.getContactByChatId(chatId))) {
       await this.repo.upsertContactForChat({ chatId, phone: phoneFromWid(chatId), name: null, isGroup: chatId.endsWith('@g.us') });
     }

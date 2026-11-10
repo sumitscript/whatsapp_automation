@@ -6,10 +6,12 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import QRCode from 'qrcode';
 import wweb from 'whatsapp-web.js';
+import { SeenIds } from '../core/util.js';
 
 const { Client, LocalAuth, MessageMedia } = wweb;
 
 const NO_RECONNECT = /LOGOUT|max qrcode retries|unpaired/i;
+const READY_RESTART_COOLDOWN_MS = 60_000; // never restart more than once a minute because of a repeated 'ready'
 
 export class WhatsAppManager extends EventEmitter {
   constructor({ sessionDir, clientId, chromiumPath, webVersion, logger }) {
@@ -25,6 +27,10 @@ export class WhatsAppManager extends EventEmitter {
     this.manualStop = false;
     this.reconnectAttempts = 0;
     this.reconnectTimer = null;
+    this.connecting = false; // true while connect() prepares the profile (before this.client exists)
+    this.connectToken = 0;
+    this.seenEvents = new SeenIds({ ttlMs: 10 * 60_000, max: 2000 });
+    this.lastReadyRestartAt = 0;
   }
 
   status() {
@@ -57,13 +63,29 @@ export class WhatsAppManager extends EventEmitter {
   }
 
   async connect() {
-    if (this.client) return this.status();
-    clearTimeout(this.reconnectTimer);
-    this.manualStop = false;
-    await fsp.mkdir(this.opts.sessionDir, { recursive: true });
-    await this.#clearChromiumLocks();
+    // `connecting` is set before the first await: a console "Connect" and the reconnect timer used to both pass
+    // the `this.client` check while the other was still preparing, launching two Chromiums on one profile.
+    if (this.client || this.connecting) return this.status();
+    this.connecting = true;
+    const token = ++this.connectToken;
+    let client;
+    try {
+      clearTimeout(this.reconnectTimer);
+      this.manualStop = false;
+      await fsp.mkdir(this.opts.sessionDir, { recursive: true });
+      await this.#clearChromiumLocks();
+      if (token !== this.connectToken) return this.status(); // disconnect/logout/restart came in while we were preparing
+      client = this.#newClient();
+      this.client = client;
+    } finally {
+      this.connecting = false;
+    }
+    this.#wire(client);
+    return this.status();
+  }
 
-    const client = new Client({
+  #newClient() {
+    return new Client({
       authStrategy: new LocalAuth({ clientId: this.opts.clientId, dataPath: this.opts.sessionDir }),
       qrMaxRetries: 8, // ~3 minutes of QR codes, then stop instead of burning CPU forever
       takeoverOnConflict: true,
@@ -93,8 +115,12 @@ export class WhatsAppManager extends EventEmitter {
         ],
       },
     });
-    this.client = client;
+  }
+
+  /** Attach the event handlers to a freshly created client and start it. */
+  #wire(client) {
     this.#set('INITIALIZING', { qr: null, lastError: null });
+    let readyCount = 0;
 
     client.on('qr', async (qr) => {
       try {
@@ -113,6 +139,11 @@ export class WhatsAppManager extends EventEmitter {
       await fsp.rm(this.#sessionPath, { recursive: true, force: true }).catch(() => {});
     });
     client.on('ready', () => {
+      if (this.client !== client) return; // a client we already dropped
+      // A second 'ready' on the same client, with no disconnect in between, means WhatsApp Web reloaded inside
+      // the browser and whatsapp-web.js injected its listeners again: from then on every event fires twice
+      // (duplicate messages, our own replies mistaken for the owner typing). Start over from the saved session.
+      if (++readyCount > 1) return this.#onReadyAgain(client);
       const info = client.info || {};
       this.reconnectAttempts = 0;
       this.#set('READY', {
@@ -123,9 +154,13 @@ export class WhatsAppManager extends EventEmitter {
     });
     client.on('change_state', (s) => this.log.debug('WhatsApp connection state', { s }));
     client.on('disconnected', (reason) => this.#onDisconnected(client, reason));
-    client.on('message', (msg) => this.emit('message', msg));
+    client.on('message', (msg) => {
+      if (this.#isDuplicate('message', msg)) return;
+      this.emit('message', msg);
+    });
     client.on('message_create', (msg) => {
-      if (msg.fromMe) this.emit('own_message', msg);
+      if (!msg.fromMe || this.#isDuplicate('own', msg)) return;
+      this.emit('own_message', msg);
     });
 
     client.initialize().catch((err) => {
@@ -133,7 +168,26 @@ export class WhatsAppManager extends EventEmitter {
       this.log.error('WhatsApp initialisation failed', { err });
       this.#onDisconnected(client, `init failed: ${err.message}`);
     });
-    return this.status();
+  }
+
+  /** The same WhatsApp message id delivered twice (re-injected listeners, a second page): handle it once. */
+  #isDuplicate(kind, msg) {
+    const id = msg?.id?._serialized;
+    if (!id) return false;
+    const dup = this.seenEvents.seen(`${kind}:${id}`);
+    if (dup) this.log.debug('Dropped a duplicate WhatsApp event', { kind, id });
+    return dup;
+  }
+
+  #onReadyAgain(client) {
+    const now = Date.now();
+    if (now - this.lastReadyRestartAt < READY_RESTART_COOLDOWN_MS) {
+      this.log.warn('WhatsApp reported ready again too soon after a restart; not restarting again');
+      return;
+    }
+    this.lastReadyRestartAt = now;
+    this.log.warn('WhatsApp Web reloaded under us (second ready on the same client); restarting the client to drop duplicate listeners');
+    this.restart().catch((err) => this.log.error('Restart after a repeated ready failed', { err }));
   }
 
   async #onDisconnected(client, reason) {
@@ -150,6 +204,7 @@ export class WhatsAppManager extends EventEmitter {
   /** Stop the browser but keep the saved session (no QR needed next time). */
   async disconnect() {
     this.manualStop = true;
+    this.connectToken++; // cancels a connect() that is still preparing
     clearTimeout(this.reconnectTimer);
     const client = this.client;
     this.client = null;
@@ -161,6 +216,7 @@ export class WhatsAppManager extends EventEmitter {
   /** Unlink this device from WhatsApp and wipe the local session. */
   async logout() {
     this.manualStop = true;
+    this.connectToken++;
     clearTimeout(this.reconnectTimer);
     const client = this.client;
     this.client = null;

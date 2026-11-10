@@ -81,6 +81,14 @@ export const config = Object.freeze({
     requestTimeoutMs: int(env.LLM_TIMEOUT_MS, 120_000),
   }),
 
+  // Groq: hosted LLM with several API keys that are rotated when one hits its rate limit (see src/llm/router.js).
+  groq: Object.freeze({
+    keys: str(env.GROQ_API_KEYS || env.GROQ_API_KEY, ''), // comma/space/newline separated; more keys can be added in the console
+    baseUrl: str(env.GROQ_BASE_URL, 'https://api.groq.com/openai/v1').replace(/\/+$/, ''),
+    concurrency: int(env.GROQ_CONCURRENCY, 8), // parallel Groq calls (the hosted model is not CPU-bound like the local one)
+    timeoutMs: int(env.GROQ_TIMEOUT_MS, 30_000), // "no data for N ms"
+  }),
+
   kb: Object.freeze({
     dir: path.resolve(root, str(env.KB_DIR, 'knowledge_base')),
     topK: int(env.KB_TOP_K, 4),
