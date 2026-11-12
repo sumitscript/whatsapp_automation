@@ -146,6 +146,9 @@ export function createBrain({ kb, llm, memory, cache, logger, availability = nul
       ? 'Continue exactly what I said last offered or asked. Do not switch to another topic.'
       : 'Answer the message in the flow of our conversation so far. Use the facts/notes only if they directly help; otherwise ignore them and never bring them up.');
 
+    // Small models copy the language of the earlier replies in the chat; say it outright, and that the old replies don't count.
+    if (lang.code === 'en') rules.push('Write the whole reply in plain English with no Hindi or Hinglish words (no "bhai", "yaar", "haan", "nahi"), even if my earlier replies in this chat used another language.');
+    else if (lang.reason === 'preference') rules.push(`Write the whole reply in ${lang.name}, even if my earlier replies in this chat used another language.`);
     const hint = lang.code === 'und' ? '' : `\n\n(Reply in ${lang.name}${lang.reason === 'preference' ? ' — they asked for it' : ''}.)`;
     const message = replyTo ? `Their message (a reply to what I said last): ${text}` : `Their message: ${text}`;
     const head = parts.length ? `${parts.join('\n\n')}\n\n---\n` : '';
@@ -169,7 +172,9 @@ export function createBrain({ kb, llm, memory, cache, logger, availability = nul
     const { intent, inherited } = resolveIntent(text, turns, { ownerAliases: ownerAliasList(settings) });
     const profile = INTENT_PROFILES[intent];
     const followUp = isFollowUp(text);
-    const longTermAvailable = settings.memoryEnabled ? longTermMemory || null : null;
+    // A "Prefers Hinglish" note must not fight the language they just asked for.
+    const stripPref = (n) => n.split('\n').filter((l) => !/\bprefers?\s+(?:hinglish|hindi|english|marathi|gujarati|tamil|telugu|bengali|kannada|malayalam|punjabi|urdu)\b/i.test(l)).join('\n').trim();
+    const longTermAvailable = settings.memoryEnabled && longTermMemory ? (lang.reason === 'preference' ? stripPref(longTermMemory) || null : longTermMemory) : null;
     // Long-term notes bridge sessions. Mid-conversation the history already carries the
     // context, and the notes' old topics pull small models off-topic, so they're skipped
     // unless the chat is fresh or the message refers to the past.

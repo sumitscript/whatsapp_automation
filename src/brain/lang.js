@@ -44,12 +44,22 @@ const NAMED = {
   urdu: { code: 'ur', name: 'Urdu (Arabic script)', script: 'native' },
 };
 const LANG_NAMES = Object.keys(NAMED).join('|');
+// People type "inglish", "angrezi", "hindhi"… spell them the way they say them
+const ALIASES = [
+  [/\b(?:inglish|englsh|engish|enlgish|ingilsh|inglis|engilsh|angrezi|angreji|angrejhi)\b/gi, 'english'],
+  [/\b(?:hindhi|hendi)\b/gi, 'hindi'],
+  [/\b(?:hinglsh|hindlish)\b/gi, 'hinglish'],
+];
+const unalias = (t) => ALIASES.reduce((s, [re, to]) => s.replace(re, to), String(t ?? '').toLowerCase());
+// "don't talk in hindi", "no hinglish", "hindi mat bolo", "hinglish nahi": leaving Hindi/Hinglish means English
+const NOT_HINDI = /\b(?:don'?t|do not|dont|stop|no|not|never|without)\b[^.\n]{0,16}?\b(?:hindi|hinglish)\b|\b(?:hindi|hinglish)\b[^.\n]{0,10}?\b(?:mat|nahi|nhi|nahin|no)\b/;
 // "I prefer hinglish", "reply in hindi", "hinglish mein baat karo", "talk to me in english please"
 const PREFERENCE = new RegExp(
   // 1: "I prefer hinglish", "reply in hindi", "talk to me in English", "speak with me in hindi", "baat karo english"
   // 2: "hinglish mein baat karo", "english please, reply"
   // 3: a message that is only the language: "English", "in english please"
-  `\\b(?:prefer(?:s|red)?|(?:reply|respond|answer|talk|speak|write|chat|text|message)(?:\\s+(?:to|with)\\s+me)?\\s+(?:in|using)|baat karo|bolo|likho)\\b[^.\\n]{0,20}?\\b(${LANG_NAMES})\\b|\\b(${LANG_NAMES})\\b[^.\\n]{0,12}?\\b(?:mein|me|mai|please|pls|only)\\b[^.\\n]{0,12}?\\b(?:baat|bolo|likho|reply|karo|talk)|^\\s*(?:in\\s+)?(${LANG_NAMES})\\s*(?:please|pls|plz|only)?\\s*[.!]*\\s*$`,
+  // 4: "english bolo", "english mein baat karo", "english me jawab do"
+  `\\b(?:prefer(?:s|red)?|(?:reply|respond|answer|talk|speak|write|chat|text|message)(?:\\s+(?:to|with)\\s+me)?(?:\\s+(?:in|using))?|baat karo|bolo|likho)\\b[^.\\n]{0,20}?\\b(${LANG_NAMES})\\b|\\b(${LANG_NAMES})\\b[^.\\n]{0,12}?\\b(?:mein|me|mai|please|pls|only)\\b[^.\\n]{0,12}?\\b(?:baat|bolo|likho|reply|karo|talk)|^\\s*(?:in\\s+)?(${LANG_NAMES})\\s*(?:please|pls|plz|only)?\\s*[.!]*\\s*$|\\b(${LANG_NAMES})\\s+(?:mein\\s+|me\\s+|mai\\s+)?(?:bolo|bol|baat|likho|reply|karo|jawab)\\b`,
   'i',
 );
 
@@ -59,8 +69,10 @@ const PREFERENCE = new RegExp(
  */
 export function statedLanguagePreference(texts) {
   for (let i = texts.length - 1; i >= 0; i--) {
-    const m = String(texts[i] ?? '').toLowerCase().match(PREFERENCE);
-    if (m) return NAMED[m[1] || m[2] || m[3]] ?? null;
+    const t = unalias(texts[i]);
+    if (NOT_HINDI.test(t)) return NAMED.english;
+    const m = t.match(PREFERENCE);
+    if (m) return NAMED[m[1] || m[2] || m[3] || m[4]] ?? null;
   }
   return null;
 }

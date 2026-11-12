@@ -299,3 +299,42 @@ test('a hung browser call is cut off instead of blocking the health check foreve
   await assert.rejects(withTimeout(new Promise(() => {}), 20, 'state check'), /state check timed out/);
   assert.equal(await withTimeout(Promise.resolve('CONNECTED'), 1000), 'CONNECTED');
 });
+
+// ------------------------------------------------------------------ switch log + language wording
+
+test('the log says which AI answers and announces every switch with the reason', async () => {
+  const lines = [];
+  const logger = { info: (m) => lines.push(m), warn: (m) => lines.push(`WARN ${m}`) };
+  const groq = fakeCloud('groq');
+  const cloudflare = fakeCloud('cloudflare');
+  // the fakes do not name the account the way the real client does: add it to the meta
+  for (const [c, name] of [[groq, 'groq'], [cloudflare, 'cloudflare']]) {
+    const orig = c.chat.bind(c);
+    c.chat = async function* (req) {
+      const evs = [];
+      for await (const e of orig(req)) evs.push(e);
+      yield { type: 'meta', provider: name, model: c.pool.models[0], keyLabel: `${name} key 1` };
+      yield* evs;
+    };
+  }
+  const s = { ...DEFAULT_SETTINGS, llmProvider: 'auto', groqModels: 'g1', cloudflareModel: MODEL };
+  const router = new RoutedLlm({ ollama: fakeOllama(), groq, cloudflare: { client: cloudflare, pool: cloudflare.pool }, getSettings: () => s, gates: { ollama: new Semaphore(1), groq: new Semaphore(2) }, logger });
+  await drain(router.chat({ model: 'm', messages: [] }));
+  assert.ok(lines.some((l) => /^AI switched: none → groq · g1 · groq key 1/.test(l)), lines.join('\n'));
+  assert.ok(lines.some((l) => /^AI answering: groq · g1/.test(l)));
+  lines.length = 0;
+  await drain(router.chat({ model: 'm', messages: [] }));
+  assert.equal(lines.filter((l) => l.startsWith('AI switched')).length, 0, 'same AI again: no switch line');
+  groq.pool.rateLimited('groq:1', { model: 'g1', retryAfterMs: 60_000 });
+  lines.length = 0;
+  await drain(router.chat({ model: 'm', messages: [] }));
+  const sw = lines.find((l) => l.startsWith('AI switched'));
+  assert.match(sw, /groq · g1 · groq key 1 → cloudflare · @cf\/google\/gemma-4-26b-a4b-it · cloudflare key 1/);
+});
+
+test('"talk in inglish", "english bolo", "hindi mat bolo" and "don\'t talk in hinglish" all mean English', async () => {
+  const { statedLanguagePreference, replyLanguage } = await import('../src/brain/lang.js');
+  for (const t of ['talk in inglish', 'Talk in English', 'english bolo', 'english me baat karo', 'hindi mat bolo', "don't talk in hinglish", 'speak english', 'angrezi me bolo']) assert.equal(statedLanguagePreference([t])?.code, 'en', t);
+  for (const t of ['my english is weak', 'I like english movies', 'translate this to english']) assert.equal(statedLanguagePreference([t]), null, t);
+  assert.equal(replyLanguage('what is your name', ['kya haal hai', 'talk in inglish'], '- Prefers Hinglish').code, 'en');
+});

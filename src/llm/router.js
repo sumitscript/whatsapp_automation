@@ -31,6 +31,8 @@ export class RoutedLlm {
     this.counters = { groq: 0, local: 0, fallbacks: 0, busy: 0 };
     this.lastFallback = null;
     this.lastLog = new Map();
+    this.current = null; // { provider, model, account } that answered last: a change is logged as a switch
+    this.why = null; // { at, text } the latest reason a provider was skipped or failed, for the switch log line
   }
 
   get numCtx() {
@@ -105,6 +107,20 @@ export class RoutedLlm {
     return !this.#wantsGroq(this.#settingsFor(), 1) && this.ollama.reusesPrefix(model);
   }
 
+  /** Log which AI answers, and say so loudly when it is not the one that answered last time (with the reason). */
+  #served(cur) {
+    const label = (c) => (c ? `${c.provider} · ${c.model}${c.account ? ` · ${c.account}` : ''}` : 'none');
+    const prev = this.current;
+    this.current = cur;
+    const same = prev && prev.provider === cur.provider && prev.model === cur.model && prev.account === cur.account;
+    if (!same) this.log?.info(`AI switched: ${label(prev)} → ${label(cur)}`, { from: prev, to: cur, reason: this.why && Date.now() - this.why.at < 120_000 ? this.why.text : undefined });
+    this.log?.info(`AI answering: ${label(cur)}`, { provider: cur.provider, model: cur.model, account: cur.account });
+  }
+
+  #skip(text) {
+    this.why = { at: Date.now(), text: String(text).slice(0, 200) };
+  }
+
   #note(kind, message, extra = {}) {
     const now = Date.now();
     if (now - (this.lastLog.get(kind) || 0) < 30_000) return;
@@ -126,13 +142,18 @@ export class RoutedLlm {
       const strict = s.llmProvider === 'groq';
       let lastErr = null;
       for (const tier of this.#tiers(s)) {
-        if (!tier.client.usable(tier.models)) continue;
+        if (!tier.client.usable(tier.models)) {
+          const wait = tier.client.pool.nextAvailableMs(tier.models);
+          this.#skip(`${tier.name} has no ready account/model${wait != null ? ` (back in ${Math.ceil(wait / 1000)}s)` : ''}`);
+          continue;
+        }
         let started = false;
         try {
           await tier.gate.acquire({ priority, signal: req.signal });
           try {
             yield { type: 'meta', provider: tier.name, model: tier.models[0] }; // corrected by the client once an account/model accepts
             for await (const ev of tier.client.chat({ ...req, models: tier.models })) {
+              if (ev.type === 'meta' && ev.keyLabel) this.#served({ provider: ev.provider, model: ev.model, account: ev.keyLabel });
               if (ev.type === 'token') started = true;
               yield ev;
             }
@@ -143,13 +164,15 @@ export class RoutedLlm {
           }
         } catch (err) {
           if (req.signal?.aborted || started) throw err; // cancelled, or half a reply already went out: cannot switch mid-sentence
-          lastErr = err; // this provider failed before saying anything: the next one (or the local model) takes over
+          lastErr = err;
+          this.#skip(`${tier.name} failed: ${err.message || err}`); // this provider failed before saying anything: the next one (or the local model) takes over
         }
       }
       const none = lastErr || new GroqUnavailableError(this.#keyCount() ? 'every hosted AI account is rate-limited right now' : 'no Groq or Cloudflare key configured', { kind: this.#keyCount() ? 'exhausted' : 'no_keys', retryAfterMs: this.#nextAvailableMs(s) });
       if (strict) return this.#busy(none);
       this.#fellBack(none);
     }
+    this.#served({ provider: 'ollama', model: req.model, account: null });
     yield { type: 'meta', provider: 'ollama', model: req.model };
     await this.gates.ollama.acquire({ priority, signal: req.signal });
     try {
