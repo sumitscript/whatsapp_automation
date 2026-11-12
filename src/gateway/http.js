@@ -9,7 +9,8 @@ import { deriveLlmState } from '../llm/status.js';
 import { replyLanguage } from '../brain/lang.js';
 import { renderTemplate } from '../core/settings-schema.js';
 import { encryptSecret, maskKey } from '../core/secrets.js';
-import { GroqClient } from '../llm/groq.js';
+import { GroqClient, msToUtcMidnight } from '../llm/groq.js';
+import { CF_DAILY_NEURONS, isCloudflareKeyFormat, probeCloudflare } from '../llm/cloudflare.js';
 import { isGroqKeyFormat } from '../llm/key-store.js';
 import { assess as assessSlot, clashLines, slotsText } from '../brain/slots.js';
 import { formatWhen, localParts, looksLikeCommitmentInContext, sanitizeAgendaInput, summarizeAgenda, zonedToUtc } from '../brain/agenda.js';
@@ -239,6 +240,7 @@ export function createApp(deps) {
   const groqDeps = deps.groq;
   const keyChanged = async () => {
     await groqDeps.store.onChange();
+    await deps.cloudflare?.store.onChange();
     await redis.publish(channels.llmKeys, String(Date.now()));
   };
   api.get('/llm/groq', async (_req, res) => {
@@ -320,6 +322,78 @@ export function createApp(deps) {
     }
     res.json({ models: groqModels.list });
   });
+  // ---------- Cloudflare Workers AI keys (the second hosted provider, after Groq) ----------
+  // Free tier: 10,000 neurons a day per Cloudflare account, shared by every model, reset at 00:00 UTC. Cloudflare sends no
+  // rate-limit headers, so the bar is our own estimate (neurons counted from token usage in Redis, like the other counters).
+  const cfDeps = deps.cloudflare;
+  api.get('/llm/cloudflare', async (_req, res) => {
+    let worker = null;
+    try {
+      worker = JSON.parse((await redis.get(keys.workerStatus)) || 'null')?.llm?.cloudflare || null;
+    } catch {
+      /* corrupt heartbeat: show this process's view */
+    }
+    const live = new Map((worker?.keys || []).map((k) => [k.id, k]));
+    let usage = {};
+    try {
+      usage = await groqDeps.usage.summary([...cfDeps.pool.keys.keys()]);
+    } catch {
+      /* the counters are a convenience */
+    }
+    const base = groqDeps.router.status().cloudflare || { model: null, ready: false, keys: [] };
+    const resetAt = Date.now() + msToUtcMidnight();
+    const list = base.keys.map((k) => {
+      const merged = { ...k, ...(live.get(k.id) ? { ...live.get(k.id), label: k.label, hint: k.hint, source: k.source } : {}) };
+      const used = usage[k.id]?.today?.neurons ?? 0;
+      return {
+        ...merged,
+        usage: usage[k.id] || null,
+        models: (merged.models || []).map((m) => {
+          const spent = m.hit?.what === 'daily free allowance' && m.state === 'cooling';
+          const u = spent ? Math.max(used, CF_DAILY_NEURONS) : used;
+          return { ...m, limits: { ...m.limits, neurons: { limit: CF_DAILY_NEURONS, used: Math.round(u), remaining: Math.max(0, Math.round(CF_DAILY_NEURONS - u)), resetAt, estimated: true } } };
+        }),
+      };
+    });
+    res.json({ model: base.model || settings.get().cloudflareModel, ready: worker?.ready ?? base.ready, keys: list, workerSeen: !!worker, dailyNeurons: CF_DAILY_NEURONS, resetAt, unreadable: cfDeps.store.unreadable, envKeys: list.filter((k) => k.source === 'env').length });
+  });
+  api.post('/llm/cloudflare/keys', async (req, res) => {
+    const accountId = String(req.body?.accountId || '').trim();
+    const token = String(req.body?.token || '').trim();
+    const label = String(req.body?.label || '').trim().slice(0, 60);
+    const secret = `${accountId}:${token}`;
+    if (!isCloudflareKeyFormat(secret)) throw httpError(400, 'Enter the 32-character Cloudflare account id and the API token (Workers AI permission)');
+    if (cfDeps.pool.status().some((k) => cfDeps.pool.secretOf(k.id) === secret)) throw httpError(409, 'That key is already added');
+    const check = await probeCloudflare(secret, { baseUrl: config.cloudflare.baseUrl, model: settings.get().cloudflareModel });
+    if (!check.ok) throw httpError(400, check.error || 'Cloudflare did not accept this key');
+    const row = await repo.addLlmKey({ provider: 'cloudflare', label: label || `cloudflare ${cfDeps.pool.size + 1}`, keyEnc: encryptSecret(secret, config.auth.jwtSecret), hint: maskKey(token) });
+    audit(req, 'llm.key.add', { id: row.id, label: row.label, provider: 'cloudflare' });
+    await keyChanged();
+    res.json({ ok: true, note: check.note || null, key: { id: `cf-db:${row.id}`, label: row.label, hint: row.hint, source: 'console' } });
+  });
+  api.delete('/llm/cloudflare/keys/:id', async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) throw httpError(400, 'Invalid id');
+    if (!(await repo.deleteLlmKey(id))) throw httpError(404, 'Key not found (keys from the CLOUDFLARE_API_KEYS environment variable are removed in the server .env)');
+    audit(req, 'llm.key.delete', { id, provider: 'cloudflare' });
+    await keyChanged();
+    res.json({ ok: true });
+  });
+  api.post('/llm/cloudflare/keys/:id/move', async (req, res) => {
+    const id = Number(req.params.id);
+    const dir = req.body?.dir === 'up' ? 'up' : req.body?.dir === 'down' ? 'down' : null;
+    if (!Number.isInteger(id) || id < 1 || !dir) throw httpError(400, 'Invalid id or direction');
+    if (!(await repo.moveLlmKey(id, dir, 'cloudflare'))) throw httpError(409, 'It cannot move further');
+    await keyChanged();
+    res.json({ ok: true });
+  });
+  api.post('/llm/cloudflare/test', async (req, res) => {
+    const secret = cfDeps.pool.secretOf(String(req.body?.id || ''));
+    if (!secret) throw httpError(404, 'Key not found');
+    const r = await probeCloudflare(secret, { baseUrl: config.cloudflare.baseUrl, model: settings.get().cloudflareModel });
+    res.json({ ok: r.ok, ms: r.ms, status: r.status, note: r.note ?? null, error: r.error ?? null });
+  });
+
   const pulling = new Set();
   api.post('/models/pull', async (req, res) => {
     const name = String(req.body?.name || '');

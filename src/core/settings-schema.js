@@ -48,6 +48,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   llmProvider: 'auto', // 'auto' = Groq when a key exists, the local model when Groq is exhausted or has no key | 'ollama' = local only | 'groq' = Groq only (see groqBusyMessage)
   groqModels: 'openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b', // model priority, tried in this order inside every Groq account (limits are per model)
   groqStrategy: 'priority', // 'priority' = account 1 with all its models first, then account 2…; 'spread' = accounts take turns
+  cloudflareModel: '@cf/google/gemma-4-26b-a4b-it', // Cloudflare Workers AI model, used after Groq when a Cloudflare key is added (its free tier is 10,000 neurons a day, shared by all models)
   groqModel: 'openai/gpt-oss-120b', // legacy single model: used only when groqModels is empty // model id on Groq. Which models exist depends on the account: pick one from the list in Settings
   groqFallback: true, // deprecated and ignored (kept so older saved settings stay valid): the provider choice decides now
   groqBusyMessage: DEFAULT_GROQ_BUSY, // the reply in "Groq only" mode when Groq cannot answer ({name} {persona} {owner})
@@ -110,6 +111,7 @@ const RULES = {
     return list && list.length && list.length <= 8 && list.every((m) => /^[\w.\-/:]{1,100}$/.test(m)) ? [...new Set(list)].join(',') : undefined;
   },
   groqStrategy: (v) => (v === 'priority' || v === 'spread' ? v : undefined),
+  cloudflareModel: (v) => (typeof v === 'string' && /^@?[\w.\-/:]{1,100}$/.test(v.trim()) ? v.trim() : undefined),
   groqModel: (v) => (typeof v === 'string' && /^[\w.\-/:]{1,100}$/.test(v.trim()) ? v.trim() : undefined),
   groqFallback: bool,
   groqBusyMessage: text(1, 1000),

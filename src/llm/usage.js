@@ -4,7 +4,7 @@
 //
 // Fields per key and day: calls (every attempt sent to Groq, 429s included), ok (finished replies), tokens (prompt +
 // completion as Groq reports them), limited (HTTP 429), errors (rejected key, network error, 5xx).
-const FIELDS = ['calls', 'ok', 'tokens', 'limited', 'errors'];
+const FIELDS = ['calls', 'ok', 'tokens', 'limited', 'errors', 'neurons']; // neurons: Cloudflare's billing unit (an estimate from the token counts)
 const KEEP_DAYS = 45;
 
 /** YYYY-MM-DD of `date` in `timeZone` (the owner's day, not UTC's). */
@@ -28,7 +28,7 @@ export class UsageStore {
     const key = this.keyFor(keyId, dayKey(this.now(), this.getTimezone()));
     const p = this.redis.pipeline();
     for (const [f, n] of fields) {
-      p.hincrby(key, f, Math.round(n));
+      p.hincrby(key, f, f === 'neurons' ? Math.round(n * 100) : Math.round(n)); // neurons kept in hundredths: a reply costs ~20
       // per model too (limits are per model, so is the usage worth knowing): fields "calls:<model>" / "tokens:<model>"
       if (model && model !== '*' && (f === 'calls' || f === 'tokens')) p.hincrby(key, `${f}:${model}`, Math.round(n));
     }
@@ -60,7 +60,7 @@ export class UsageStore {
         rows.slice(0, n).forEach((r) => {
           const h = r && r[1];
           if (!h) return;
-          for (const f of FIELDS) acc[f] += Number(h[f]) || 0;
+          for (const f of FIELDS) acc[f] += f === 'neurons' ? (Number(h[f]) || 0) / 100 : Number(h[f]) || 0;
           for (const [field, v] of Object.entries(h)) {
             const m = /^(calls|tokens):(.+)$/.exec(field);
             if (m) (acc.models[m[2]] ??= { calls: 0, tokens: 0 })[m[1]] += Number(v) || 0;

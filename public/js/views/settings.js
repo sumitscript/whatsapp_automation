@@ -1,6 +1,7 @@
 // Settings, model management, playground and password change.
 import { api } from '../api.js';
 import { icons } from '../icons.js';
+import { infoButton, installLimitPanel, mountCloudflare } from './provider-limits.js';
 import { $, confirmDialog, escapeHtml, formatBytes, formatMs, formatNumber, formatWhatsApp, html, raw, toast } from '../util.js';
 
 const TIER_LABEL = { fast: 'Fast', balanced: 'Balanced', quality: 'Quality' };
@@ -113,9 +114,9 @@ export async function mount(root, { hub }) {
           <p class="muted small" id="gq-summary">Loading…</p>
           <form id="gq-form" class="stack">
             <div class="radio-cards">
-              <label class="radio-card"><input type="radio" name="llmProvider" value="auto" /><span><strong>Auto <span class="muted small">(recommended)</span></strong><small>Groq while a key can answer; the local model takes over when every key is used up, Groq is down, or no key is added</small></span></label>
+              <label class="radio-card"><input type="radio" name="llmProvider" value="auto" /><span><strong>Auto <span class="muted small">(recommended)</span></strong><small>Groq first, then Cloudflare, while a key can answer; the local model takes over when every account is used up, the providers are down, or no key is added</small></span></label>
               <label class="radio-card"><input type="radio" name="llmProvider" value="ollama" /><span><strong>Local only</strong><small>Always the model on this server's CPU. Private, but slower. Groq is never used</small></span></label>
-              <label class="radio-card"><input type="radio" name="llmProvider" value="groq" /><span><strong>Groq only</strong><small>Never the local model. When no Groq key can answer, people get the short-break message below</small></span></label>
+              <label class="radio-card"><input type="radio" name="llmProvider" value="groq" /><span><strong>Cloud only</strong><small>Groq, then Cloudflare, never the local model. When no account can answer, people get the short-break message below</small></span></label>
             </div>
             <label class="field"><span>Models, best first <span class="muted small">(tried in this order inside every account; Groq's limits are per model)</span></span>
               <input name="groqModels" list="gq-models" placeholder="openai/gpt-oss-120b, openai/gpt-oss-20b, qwen/qwen3.8-27b" autocomplete="off" /><datalist id="gq-models"></datalist>
@@ -426,7 +427,7 @@ export async function mount(root, { hub }) {
       const state = k.state === 'disabled' ? html`<span class="badge badge-bad">Rejected by Groq</span>` : '';
       const org = k.sameOrgAs ? html`<div class="small" style="color: var(--warn)">Same Groq organization as ${k.sameOrgAs}: they share limits, so this adds no extra capacity</div>` : k.org ? html`<div class="muted small">Organization ${k.org}</div>` : '';
       const why = k.lastError && k.state !== 'ready' ? html`<div class="muted small">${k.lastError}</div>` : '';
-      return html`<tr><td><strong>Account ${k.priority ?? i + 1}: ${k.label}</strong><div class="muted small">${k.hint} · ${k.source === 'env' ? 'server env' : 'console'}</div>${raw(org)}</td><td>${raw(state)}<div class="chip-group">${raw((k.models || []).map(modelChip).join(''))}</div>${raw(why)}</td><td class="muted small">${raw(used)}</td><td class="actions">${raw(move)}<button class="btn btn-ghost btn-sm" data-act="test" data-id="${k.id}">Test</button>${raw(remove)}</td></tr>`;
+      return html`<tr><td><strong>Account ${k.priority ?? i + 1}: ${k.label}</strong> ${raw(infoButton('groq', k.id))}<div class="muted small">${k.hint} · ${k.source === 'env' ? 'server env' : 'console'}</div>${raw(org)}</td><td>${raw(state)}<div class="chip-group">${raw((k.models || []).map(modelChip).join(''))}</div>${raw(why)}</td><td class="muted small">${raw(used)}</td><td class="actions">${raw(move)}<button class="btn btn-ghost btn-sm" data-act="test" data-id="${k.id}">Test</button>${raw(remove)}</td></tr>`;
     });
     $('#gq-keys', root).innerHTML = rows.length
       ? html`<table class="table"><thead><tr><th>Account (priority order)</th><th>Models</th><th>Usage</th><th></th></tr></thead><tbody>${raw(rows.join(''))}</tbody></table>`
@@ -511,6 +512,9 @@ export async function mount(root, { hub }) {
   });
   loadGroq();
   gq.timer = setInterval(loadGroq, 5000); // live key status: who is cooling, who is ready
+  // Cloudflare Workers AI card + the usage-limit panels behind every account's "i" button
+  const cf = mountCloudflare(root, {});
+  const limitPanel = installLimitPanel(root, (kind, id) => (kind === 'cloudflare' ? cf.find(id) : gq.data?.keys.find((k) => k.id === id)));
 
   const offs = [
     hub.on('model:pull', (p) => {
@@ -618,6 +622,8 @@ export async function mount(root, { hub }) {
   return {
     destroy: () => {
       clearInterval(gq.timer);
+      cf.stop();
+      limitPanel.destroy();
       offs.forEach((o) => o());
     },
   };

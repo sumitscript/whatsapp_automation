@@ -44,11 +44,11 @@ test('usage is counted per key and per day (in the owner\'s timezone) and surviv
   await mk().record('db:1', { calls: 10, tokens: 16_260 });
   now = new Date('2026-11-12T08:30:00Z');
   const s = await mk().summary(['db:1', 'db:2', 'db:3']);
-  assert.deepEqual({ ...s['db:1'].today, models: undefined }, { calls: 2, ok: 1, tokens: 1040, limited: 1, errors: 0, models: undefined });
+  assert.deepEqual({ ...s['db:1'].today, models: undefined }, { calls: 2, ok: 1, tokens: 1040, limited: 1, errors: 0, neurons: 0, models: undefined });
   assert.equal(s['db:1'].d7.calls, 12);
   assert.equal(s['db:1'].d30.tokens, 17_300);
   assert.equal(s['db:2'].today.calls, 3);
-  assert.deepEqual({ ...s['db:3'].today, models: undefined }, { calls: 0, ok: 0, tokens: 0, limited: 0, errors: 0, models: undefined }, 'a key never used reads zero');
+  assert.deepEqual({ ...s['db:3'].today, models: undefined }, { calls: 0, ok: 0, tokens: 0, limited: 0, errors: 0, neurons: 0, models: undefined }, 'a key never used reads zero');
   assert.ok([...redis.ttl.values()].every((t) => t >= 40 * 86_400), 'counters expire on their own');
 });
 

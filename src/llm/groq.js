@@ -42,13 +42,40 @@ export function orgFromMessage(text) {
   return m ? m[1] : null;
 }
 
+/** Limit details out of a 429 text: "...tokens per day (TPD): Limit 200000, Used 199961, Requested 1500..." */
+export function limitFromMessage(text) {
+  const t = String(text || '');
+  const kind = /(requests|tokens)\s+per\s+(day|minute|hour|second)/i.exec(t);
+  const nums = /Limit\s+(\d+),\s*Used\s+(\d+)/i.exec(t);
+  if (!kind && !nums) return null;
+  return { what: kind ? `${kind[1].toLowerCase()} per ${kind[2].toLowerCase()}` : null, limit: nums ? Number(nums[1]) : null, used: nums ? Number(nums[2]) : null };
+}
+
+/** Milliseconds until the next 00:00 UTC (Cloudflare resets its daily free allowance then). */
+export function msToUtcMidnight(now = Date.now()) {
+  const d = new Date(now);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) - now;
+}
+
+// One client for every OpenAI-compatible provider (Groq, Cloudflare Workers AI): they differ only in the URL, how the key is
+// sent, and how "daily allowance used up" is recognised.
 export class GroqClient {
-  constructor({ pool, baseUrl = 'https://api.groq.com/openai/v1', timeoutMs = 30_000, logger, fetchImpl } = {}) {
+  constructor({ pool, baseUrl = 'https://api.groq.com/openai/v1', timeoutMs = 30_000, logger, fetchImpl, provider = 'groq', urlFor, tokenFor, reasoning = true, exhausted, neuronsFor } = {}) {
     this.pool = pool;
+    this.provider = provider;
+    this.urlFor = urlFor || (() => `${this.baseUrl}/chat/completions`); // (secret) => chat completions URL
+    this.tokenFor = tokenFor || ((secret) => secret); // (secret) => bearer token
+    this.reasoning = reasoning; // send provider-specific reasoning flags for known reasoning models
+    this.exhausted = exhausted || null; // (status, detail) => ms until the allowance returns, or null
+    this.neuronsFor = neuronsFor || null; // (model, promptTokens, completionTokens) => neurons, for providers billed in them
     this.baseUrl = String(baseUrl).replace(/\/+$/, '');
     this.timeoutMs = timeoutMs;
     this.log = logger;
     this.fetch = fetchImpl || ((...a) => fetch(...a));
+  }
+
+  get label() {
+    return this.provider === 'cloudflare' ? 'Cloudflare' : 'Groq';
   }
 
   /** At least one (account, model) pair is ready right now. */
@@ -57,7 +84,7 @@ export class GroqClient {
   }
 
   #headers(secret) {
-    return { authorization: `Bearer ${secret}`, 'content-type': 'application/json' };
+    return { authorization: `Bearer ${this.tokenFor(secret)}`, 'content-type': 'application/json' };
   }
 
   /** Open a streaming completion on one (account, model). Updates the pool and throws a typed error on failure. */
@@ -73,12 +100,12 @@ export class GroqClient {
     const sig = signal ? AbortSignal.any([signal, ctl.signal]) : ctl.signal;
     let res;
     try {
-      res = await this.fetch(`${this.baseUrl}/chat/completions`, { method: 'POST', headers: this.#headers(pick.secret), body: JSON.stringify(body), signal: sig });
+      res = await this.fetch(this.urlFor(pick.secret), { method: 'POST', headers: this.#headers(pick.secret), body: JSON.stringify(body), signal: sig });
     } catch (err) {
       watch.stop();
       if (signal?.aborted) throw err;
       this.pool.transient(pick.id, String(err.message || err));
-      throw new GroqUnavailableError(`Groq network error: ${err.message || err}`, { kind: 'network' });
+      throw new GroqUnavailableError(`${this.label} network error: ${err.message || err}`, { kind: 'network' });
     }
     if (res.ok) {
       const h = res.headers;
@@ -86,6 +113,8 @@ export class GroqClient {
         model: pick.model,
         remainingTokens: Number(h.get('x-ratelimit-remaining-tokens')) || (h.get('x-ratelimit-remaining-tokens') === '0' ? 0 : undefined),
         remainingRequests: h.get('x-ratelimit-remaining-requests') != null ? Number(h.get('x-ratelimit-remaining-requests')) : undefined,
+        limitTokens: h.get('x-ratelimit-limit-tokens') != null ? Number(h.get('x-ratelimit-limit-tokens')) : undefined,
+        limitRequests: h.get('x-ratelimit-limit-requests') != null ? Number(h.get('x-ratelimit-limit-requests')) : undefined,
         resetTokensMs: parseDuration(h.get('x-ratelimit-reset-tokens')),
         resetRequestsMs: parseDuration(h.get('x-ratelimit-reset-requests')),
       });
@@ -100,10 +129,16 @@ export class GroqClient {
         return text;
       }
     })();
-    const msg = `Groq ${res.status} (${pick.model}): ${String(detail).slice(0, 200)}`;
+    const msg = `${this.label} ${res.status} (${pick.model}): ${String(detail).slice(0, 200)}`;
+    const allowanceMs = this.exhausted?.(res.status, String(detail));
+    if (allowanceMs) {
+      // the provider's daily free allowance is used up: rest this account until it comes back
+      this.pool.rateLimited(pick.id, { model: pick.model, retryAfterMs: allowanceMs, reason: 'daily free allowance used up', hit: { what: 'daily free allowance', limit: null, used: null } });
+      throw new GroqUnavailableError(msg, { kind: 'rate_limit', retryAfterMs: allowanceMs });
+    }
     if (res.status === 429) {
       const retryAfterMs = parseDuration(res.headers.get('retry-after')) ?? retryHint(detail);
-      this.pool.rateLimited(pick.id, { model: pick.model, retryAfterMs, reason: String(detail).slice(0, 120), org: orgFromMessage(detail) });
+      this.pool.rateLimited(pick.id, { model: pick.model, retryAfterMs, reason: String(detail).slice(0, 120), org: orgFromMessage(detail), hit: limitFromMessage(detail) });
       throw new GroqUnavailableError(msg, { kind: 'rate_limit', retryAfterMs });
     }
     if (res.status === 401 || res.status === 403) {
@@ -129,8 +164,9 @@ export class GroqClient {
 
   #body(model, { messages, temperature, maxTokens }) {
     const body = { model, messages, temperature, max_tokens: maxTokens, top_p: 0.9, stream: true };
-    if (REASONING_HIDDEN.test(model)) body.reasoning_format = 'hidden';
-    if (REASONING_LOW.test(model)) body.reasoning_effort = 'low';
+    if (this.reasoning && REASONING_HIDDEN.test(model)) body.reasoning_format = 'hidden';
+    if (this.reasoning && REASONING_LOW.test(model)) body.reasoning_effort = 'low';
+    if (!this.reasoning) body.stream_options = { include_usage: true };
     return body;
   }
 
@@ -166,12 +202,13 @@ export class GroqClient {
       }
     }
     const { res, watch, key } = opened;
-    yield { type: 'meta', provider: 'groq', model: key.model, keyLabel: key.label };
+    yield { type: 'meta', provider: this.provider, model: key.model, keyLabel: key.label };
     const started = performance.now();
     const decoder = new TextDecoder();
     let buf = '';
     let usage = null;
     let finish = null;
+    let produced = 0;
     try {
       for await (const chunk of res.body) {
         watch.touch();
@@ -191,7 +228,10 @@ export class GroqClient {
           }
           if (ev.error) throw new Error(ev.error.message || 'Groq stream error');
           const c = ev.choices?.[0];
-          if (c?.delta?.content) yield { type: 'token', text: c.delta.content };
+          if (c?.delta?.content) {
+            produced += c.delta.content.length;
+            yield { type: 'token', text: c.delta.content };
+          }
           if (c?.finish_reason) finish = c.finish_reason;
           usage = ev.x_groq?.usage || ev.usage || usage;
         }
@@ -199,7 +239,9 @@ export class GroqClient {
     } finally {
       watch.stop();
     }
-    this.pool.success(key.id, { model: key.model, tokens: usage?.total_tokens || (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0), done: true });
+    const promptTokens = usage?.prompt_tokens ?? need;
+    const completionTokens = usage?.completion_tokens ?? Math.ceil(produced / 3.5);
+    this.pool.success(key.id, { model: key.model, tokens: usage?.total_tokens || (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0) || (this.neuronsFor ? promptTokens + completionTokens : 0), neurons: this.neuronsFor ? this.neuronsFor(key.model, promptTokens, completionTokens) : 0, done: true });
     const ms = (s) => Math.round((Number(s) || 0) * 1000);
     yield {
       type: 'done',
@@ -211,7 +253,7 @@ export class GroqClient {
         loadMs: 0,
         totalMs: ms(usage?.total_time) || Math.round(performance.now() - started),
         doneReason: finish === 'length' ? 'length' : finish || 'stop',
-        provider: 'groq',
+        provider: this.provider,
         model: key.model,
         keyLabel: key.label,
       },

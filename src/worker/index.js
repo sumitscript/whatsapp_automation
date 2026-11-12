@@ -16,6 +16,7 @@ import { OllamaClient } from '../llm/ollama.js';
 import { KeyPool } from '../llm/key-pool.js';
 import { KeyStore } from '../llm/key-store.js';
 import { GroqClient } from '../llm/groq.js';
+import { createCloudflareClient } from '../llm/cloudflare.js';
 import { RoutedLlm } from '../llm/router.js';
 import { UsageStore } from '../llm/usage.js';
 import { createBrain } from '../brain/pipeline.js';
@@ -54,9 +55,17 @@ const usage = new UsageStore({ redis, keyFor: keys.llmUsage, getTimezone: () => 
 groqPool.usageSink = (id, d) => usage.record(id, d);
 const keyStore = new KeyStore({ pool: groqPool, repo, secret: config.auth.jwtSecret, envKeys: config.groq.keys, logger: log });
 await keyStore.start();
+const cfPool = new KeyPool();
+cfPool.usageSink = (id, d) => usage.record(id, d);
+const cfStore = new KeyStore({ pool: cfPool, repo, secret: config.auth.jwtSecret, envKeys: config.cloudflare.keys, logger: log, provider: 'cloudflare', idPrefix: 'cf-' });
+await cfStore.start();
+const cf = createCloudflareClient({ pool: cfPool, baseUrl: config.cloudflare.baseUrl, timeoutMs: config.cloudflare.timeoutMs, logger: log });
 await sub.subscribe(channels.llmKeys);
 sub.on('message', (ch) => {
-  if (ch === channels.llmKeys) keyStore.onChange();
+  if (ch === channels.llmKeys) {
+    keyStore.onChange();
+    cfStore.onChange();
+  }
 });
 const groq = new GroqClient({ pool: groqPool, baseUrl: config.groq.baseUrl, timeoutMs: config.groq.timeoutMs, logger: log });
 
@@ -69,8 +78,9 @@ const gate = new Semaphore(config.ollama.concurrency);
 const llmGated = new RoutedLlm({
   ollama: llm,
   groq,
+  cloudflare: { client: cf, pool: cfPool },
   getSettings: () => settings.get(),
-  gates: { ollama: gate, groq: new Semaphore(config.groq.concurrency) },
+  gates: { ollama: gate, groq: new Semaphore(config.groq.concurrency), cloudflare: new Semaphore(config.cloudflare.concurrency) },
   localReady: () => modelState.ready,
   logger: log,
 });

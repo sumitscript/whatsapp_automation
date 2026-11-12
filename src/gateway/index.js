@@ -16,6 +16,7 @@ import { OllamaClient } from '../llm/ollama.js';
 import { KeyPool } from '../llm/key-pool.js';
 import { KeyStore } from '../llm/key-store.js';
 import { GroqClient } from '../llm/groq.js';
+import { createCloudflareClient } from '../llm/cloudflare.js';
 import { RoutedLlm } from '../llm/router.js';
 import { UsageStore } from '../llm/usage.js';
 import { Semaphore } from '../core/util.js';
@@ -57,16 +58,25 @@ const usage = new UsageStore({ redis, keyFor: keys.llmUsage, getTimezone: () => 
 groqPool.usageSink = (id, d) => usage.record(id, d);
 const keyStore = new KeyStore({ pool: groqPool, repo, secret: config.auth.jwtSecret, envKeys: config.groq.keys, logger: log });
 await keyStore.start();
+const cfPool = new KeyPool();
+cfPool.usageSink = (id, d) => usage.record(id, d);
+const cfStore = new KeyStore({ pool: cfPool, repo, secret: config.auth.jwtSecret, envKeys: config.cloudflare.keys, logger: log, provider: 'cloudflare', idPrefix: 'cf-' });
+await cfStore.start();
+const cf = createCloudflareClient({ pool: cfPool, baseUrl: config.cloudflare.baseUrl, timeoutMs: config.cloudflare.timeoutMs, logger: log });
 await sub.subscribe(channels.llmKeys);
 sub.on('message', (ch) => {
-  if (ch === channels.llmKeys) keyStore.onChange();
+  if (ch === channels.llmKeys) {
+    keyStore.onChange();
+    cfStore.onChange();
+  }
 });
 const groq = new GroqClient({ pool: groqPool, baseUrl: config.groq.baseUrl, timeoutMs: config.groq.timeoutMs, logger: log });
 const router = new RoutedLlm({
   ollama: llm,
   groq,
+  cloudflare: { client: cf, pool: cfPool },
   getSettings: () => settings.get(),
-  gates: { ollama: new Semaphore(config.ollama.concurrency), groq: new Semaphore(config.groq.concurrency) },
+  gates: { ollama: new Semaphore(config.ollama.concurrency), groq: new Semaphore(config.groq.concurrency), cloudflare: new Semaphore(config.cloudflare.concurrency) },
   logger: log,
 });
 const availability = createAvailability({ repo, getSettings: () => settings.get() });
@@ -79,7 +89,7 @@ const sessions = new SessionManager({ repo, settings, logger: log });
 sessions.startSweeper(); // ends idle sessions (sessionIdleMinutes)
 const inbox = new Inbox({ wa, repo, redis, bus, settings, memory, sessions, hub, availability, logger: log });
 
-const app = createApp({ auth, repo, redis, wa, inbox, settings, kb, llm, brain, memory, hub, availability, groq: { pool: groqPool, client: groq, store: keyStore, router, usage }, logger: log });
+const app = createApp({ auth, repo, redis, wa, inbox, settings, kb, llm, brain, memory, hub, availability, groq: { pool: groqPool, client: groq, store: keyStore, router, usage }, cloudflare: { pool: cfPool, client: cf, store: cfStore }, logger: log });
 const server = http.createServer(app);
 const realtime = await createRealtime(server, { auth, wa, subscriber: sub, logger: log });
 hub.emit = realtime.emit;

@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { assess, availabilityConfig, clashLines, freeSlots, itemInterval, parseHHMM, slotsText } from '../src/brain/slots.js';
 import { createAvailability } from '../src/brain/availability.js';
@@ -137,6 +137,15 @@ const kb = new KnowledgeBase({ dir: new URL('../knowledge_base', import.meta.url
 
 async function ask(text, items) {
   await kb.load().catch(() => {});
+  mock.timers.enable({ apis: ['Date'], now: NOW }); // "tomorrow" in the pipeline is read from the clock: pin it to the day these fixtures assume
+  try {
+    return await askAt(text, items);
+  } finally {
+    mock.timers.reset();
+  }
+}
+
+async function askAt(text, items) {
   const llmCalls = [];
   const llm = { numCtx: 4096, async *chat(req) { llmCalls.push(req); yield { type: 'token', text: 'MODEL' }; yield { type: 'done', stats: {} }; } };
   const settings = { ...DEFAULT_SETTINGS, ownerName: 'Sumit Soni', model: 'x', timezone: TZ };

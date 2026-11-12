@@ -97,7 +97,7 @@ export class KeyPool {
     const key = `${this.#scope(k)}|${model}`;
     let p = this.pairs.get(key);
     if (!p && create) {
-      p = { cooldownUntil: 0, remainingTokens: null, remainingRequests: null, limited: 0, lastError: null, gone: false };
+      p = { cooldownUntil: 0, remainingTokens: null, remainingRequests: null, limitTokens: null, limitRequests: null, resetTokensAt: 0, resetRequestsAt: 0, hit: null, limited: 0, lastError: null, gone: false };
       this.pairs.set(key, p);
     }
     return p;
@@ -149,16 +149,21 @@ export class KeyPool {
     return { id: k.id, secret: k.secret, label: k.label, model: m };
   }
 
-  success(id, { model = ANY, remainingTokens, remainingRequests, resetTokensMs, resetRequestsMs, tokens = 0, done = false } = {}) {
+  success(id, { model = ANY, remainingTokens, remainingRequests, limitTokens, limitRequests, resetTokensMs, resetRequestsMs, tokens = 0, neurons = 0, done = false } = {}) {
     const k = this.keys.get(id);
     if (!k) return;
-    if (done) this.usageSink?.(id, { ok: 1, tokens, model }); // the reply finished (the earlier success() is just the response headers)
+    if (done) this.usageSink?.(id, { ok: 1, tokens, model, ...(neurons ? { neurons } : {}) }); // the reply finished (the earlier success() is just the response headers)
     k.failStreak = 0;
     k.lastError = null;
     k.tokens += tokens;
     const p = this.#pair(k, model, true);
     if (remainingTokens != null) p.remainingTokens = remainingTokens;
     if (remainingRequests != null) p.remainingRequests = remainingRequests;
+    if (limitTokens != null) p.limitTokens = limitTokens;
+    if (limitRequests != null) p.limitRequests = limitRequests;
+    if (resetTokensMs != null) p.resetTokensAt = this.now() + resetTokensMs;
+    if (resetRequestsMs != null) p.resetRequestsAt = this.now() + resetRequestsMs;
+    if (remainingTokens != null || remainingRequests != null) p.hit = null;
     // Almost out of requests or tokens for this model: rest the pair until the window resets instead of spending the next call on a 429.
     if (remainingRequests != null && remainingRequests <= 0 && resetRequestsMs) p.cooldownUntil = this.now() + Math.min(resetRequestsMs, this.maxCooldownMs);
     else if (remainingTokens != null && remainingTokens <= 0 && resetTokensMs) p.cooldownUntil = this.now() + Math.min(resetTokensMs, this.maxCooldownMs);
@@ -168,7 +173,7 @@ export class KeyPool {
    * HTTP 429 for this model. `org` (from the provider's message) makes the rest apply to every key of that organization:
    * they share the limit.
    */
-  rateLimited(id, { model = ANY, retryAfterMs, reason = 'rate limit', org = null } = {}) {
+  rateLimited(id, { model = ANY, retryAfterMs, reason = 'rate limit', org = null, hit = null } = {}) {
     const k = this.keys.get(id);
     if (!k) return;
     if (org) k.org = org;
@@ -177,6 +182,7 @@ export class KeyPool {
     const p = this.#pair(k, model, true);
     p.limited++;
     p.lastError = reason;
+    if (hit) p.hit = { ...hit, at: this.now() }; // which limit was reached (tokens per day…) and what the provider said it was
     p.cooldownUntil = this.now() + Math.min(Math.max(retryAfterMs ?? this.defaultCooldownMs, 1000), this.maxCooldownMs);
   }
 
@@ -231,13 +237,25 @@ export class KeyPool {
     return waits.length ? Math.min(...waits) : null;
   }
 
+  /** What the provider last told us about this model's limits; a window whose reset time has passed counts as full again. */
+  #limits(p) {
+    if (!p) return {};
+    const t = this.now();
+    const one = (limit, remaining, resetAt) => {
+      if (limit == null && remaining == null) return null;
+      const fresh = resetAt && resetAt <= t; // the window has reset since we last heard
+      return { limit: limit ?? null, remaining: fresh ? (limit ?? null) : remaining, resetAt: fresh ? null : resetAt || null };
+    };
+    return { requests: one(p.limitRequests, p.remainingRequests, p.resetRequestsAt), tokens: one(p.limitTokens, p.remainingTokens, p.resetTokensAt) };
+  }
+
   status(models = this.models) {
     const list = models?.length ? models : [ANY];
     const all = [...this.keys.values()];
     return all.map((k, i) => {
       const perModel = list.map((m) => {
         const p = this.#pair(k, m);
-        return { id: m, state: this.#state(k, m), cooldownMs: this.#cooldownMs(k, m), remainingTokens: p?.remainingTokens ?? null, remainingRequests: p?.remainingRequests ?? null, limited: p?.limited ?? 0, gone: !!p?.gone, lastError: p?.lastError ?? null };
+        return { id: m, state: this.#state(k, m), cooldownMs: this.#cooldownMs(k, m), restUntil: this.#cooldownMs(k, m) > 0 ? this.now() + this.#cooldownMs(k, m) : null, remainingTokens: p?.remainingTokens ?? null, remainingRequests: p?.remainingRequests ?? null, limits: this.#limits(p), hit: p?.hit ?? null, limited: p?.limited ?? 0, gone: !!p?.gone, lastError: p?.lastError ?? null };
       });
       const ready = perModel.filter((x) => x.state === 'ready').length;
       const state = k.disabled ? 'disabled' : ready ? 'ready' : 'cooling';

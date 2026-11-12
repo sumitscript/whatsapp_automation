@@ -89,6 +89,15 @@ export const config = Object.freeze({
     timeoutMs: int(env.GROQ_TIMEOUT_MS, 30_000), // "no data for N ms"
   }),
 
+  // Cloudflare Workers AI: a second hosted provider after Groq (free tier 10,000 neurons/day per account, reset 00:00 UTC).
+  // Keys are "ACCOUNT_ID:API_TOKEN", separated by commas/spaces; more can be added in the console.
+  cloudflare: Object.freeze({
+    keys: str(env.CLOUDFLARE_API_KEYS, ''),
+    baseUrl: str(env.CLOUDFLARE_BASE_URL, 'https://api.cloudflare.com/client/v4').replace(/\/+$/, ''),
+    concurrency: int(env.CLOUDFLARE_CONCURRENCY, 8),
+    timeoutMs: int(env.CLOUDFLARE_TIMEOUT_MS, 30_000),
+  }),
+
   kb: Object.freeze({
     dir: path.resolve(root, str(env.KB_DIR, 'knowledge_base')),
     topK: int(env.KB_TOP_K, 4),

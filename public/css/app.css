@@ -945,3 +945,22 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { box-shadow: 
 
 /* Availability panel (Agenda) */
 .plain-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+
+/* ---- provider limit bars (the "i" panel next to each AI account) ---- */
+.info-btn { width: 18px; height: 18px; margin-left: 4px; border-radius: 50%; border: 1px solid var(--muted); background: transparent; color: var(--muted); font: italic 700 11px/1 Georgia, serif; cursor: help; padding: 0; vertical-align: middle; }
+.info-btn:hover, .info-btn:focus-visible { color: var(--text, inherit); border-color: currentColor; outline: none; }
+.limit-pop { position: fixed; z-index: 60; max-height: 80vh; overflow: auto; padding: 12px 14px; border-radius: 10px; background: var(--panel, var(--bg)); border: 1px solid var(--border); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); font-size: 0.82rem; }
+.limit-pop[hidden] { display: none; }
+.limit-pop h3 { margin: 0 0 8px; font-size: 0.9rem; }
+.limit-pop h4 { margin: 10px 0 6px; font-size: 0.82rem; display: flex; gap: 6px; align-items: center; }
+.lim-row { margin: 6px 0 10px; }
+.lim-head { display: flex; justify-content: space-between; gap: 8px; font-size: 0.78rem; margin-bottom: 3px; }
+.lim-note { padding: 6px 8px; border-radius: 6px; margin: 4px 0 6px; }
+.lim-bad { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+.meter { height: 7px; border-radius: 4px; background: color-mix(in srgb, var(--muted) 25%, transparent); overflow: hidden; }
+.meter.mini { width: 140px; margin-bottom: 3px; }
+.meter > span { display: block; height: 100%; border-radius: 4px; }
+.meter-ok { background: var(--ok); }
+.meter-warn { background: var(--warn); }
+.meter-bad { background: var(--bad); }
+.lim-usage { margin: 6px 0 2px; }

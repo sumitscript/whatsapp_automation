@@ -7,6 +7,7 @@ import path from 'node:path';
 import QRCode from 'qrcode';
 import wweb from 'whatsapp-web.js';
 import { SeenIds } from '../core/util.js';
+import { Watchdog, withTimeout } from '../core/watchdog.js';
 import { patchSendMessage } from '../core/wwebjs-patch.js';
 import { trySendStrategies } from '../core/image-send.js';
 
@@ -151,6 +152,7 @@ export class WhatsAppManager extends EventEmitter {
       if (++readyCount > 1) return this.#onReadyAgain(client);
       const info = client.info || {};
       this.reconnectAttempts = 0;
+      this.#watch(client);
       this.#set('READY', {
         qr: null,
         lastError: null,
@@ -195,10 +197,49 @@ export class WhatsAppManager extends EventEmitter {
     this.restart().catch((err) => this.log.error('Restart after a repeated ready failed', { err }));
   }
 
+  /**
+   * Health watchdog: while READY, ask WhatsApp Web for its connection state every 45 s. A page that is closed, a probe that
+   * hangs, or a state other than CONNECTED three times in a row means the session went stale (typical after the account sat
+   * idle for hours); drop the browser and reconnect from the saved session, which is what pressing Disconnect + Connect did.
+   */
+  #watch(client) {
+    clearInterval(this.watchTimer);
+    const dog = new Watchdog({ failLimit: 3 });
+    // the browser itself dying (OOM kill, crash) is reported at once, no need to wait for three probes
+    client.pupBrowser?.once?.('disconnected', () => this.#onDisconnected(client, 'browser closed'));
+    this.watchTimer = setInterval(async () => {
+      if (this.client !== client || this.state !== 'READY') return;
+      let why = null;
+      try {
+        if (client.pupPage?.isClosed?.()) throw new Error('the browser page is closed');
+        const st = await withTimeout(client.getState(), 20_000, 'WhatsApp state check');
+        if (st !== 'CONNECTED') why = `WhatsApp Web state is ${st}`;
+      } catch (err) {
+        why = err.message || String(err);
+      }
+      if (!why) return void dog.record(true);
+      this.log.warn('WhatsApp health check failed', { why });
+      if (dog.record(false)) {
+        this.log.warn('WhatsApp looks stalled; restarting the connection from the saved session', { why });
+        this.reconnectAttempts = 0; // a stall is not a repeated crash: reconnect quickly
+        this.#onDisconnected(client, `stalled: ${why}`);
+      }
+    }, 45_000);
+    this.watchTimer.unref?.();
+  }
+
   async #onDisconnected(client, reason) {
     if (this.client !== client) return;
     this.client = null;
-    await client.destroy().catch(() => {});
+    clearInterval(this.watchTimer);
+    // A frozen browser can make destroy() hang: give it 15 s, then kill the process so the reconnect can start.
+    await withTimeout(client.destroy(), 15_000, 'closing the browser').catch(() => {
+      try {
+        client.pupBrowser?.process?.()?.kill('SIGKILL');
+      } catch {
+        /* already gone */
+      }
+    });
     this.#set('DISCONNECTED', { qr: null, me: null, lastError: String(reason || 'disconnected') });
     if (this.manualStop || NO_RECONNECT.test(String(reason))) return;
     const delay = Math.min(5000 * 2 ** this.reconnectAttempts++, 120_000);
@@ -211,6 +252,7 @@ export class WhatsAppManager extends EventEmitter {
     this.manualStop = true;
     this.connectToken++; // cancels a connect() that is still preparing
     clearTimeout(this.reconnectTimer);
+    clearInterval(this.watchTimer);
     const client = this.client;
     this.client = null;
     if (client) await client.destroy().catch((err) => this.log.warn('destroy failed', { err }));
@@ -224,6 +266,7 @@ export class WhatsAppManager extends EventEmitter {
     this.connectToken++;
     this.ownChatCache.clear(); // another account may be linked next
     clearTimeout(this.reconnectTimer);
+    clearInterval(this.watchTimer);
     const client = this.client;
     this.client = null;
     if (client) {

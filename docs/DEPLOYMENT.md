@@ -279,3 +279,12 @@ Settings → AI provider:
 - **Priority**: account 1 (top of the key list) with all its models in order, then account 2 from the top of the list again, then account 3. When everything is used up, Auto falls back to the local model and Groq-only sends the short-break message.
 - **Spread**: accounts take turns so every account's quota is used evenly.
 - Use ↑/↓ on a key to change the account order. A model an account has no access to is skipped for that account (marked "not available").
+
+## Cloudflare Workers AI (free second backup) and the WhatsApp watchdog
+
+Order of answering in Auto: Groq (accounts, models), then Cloudflare Workers AI, then the local model. In "Cloud only" mode the local model is never used and people get the short-break message when both are used up.
+
+- Create a Cloudflare API token from the **Workers AI** template (My Profile → API Tokens) and note the account id (dashboard sidebar, 32 characters). Add both in Settings → Cloudflare accounts, or set `CLOUDFLARE_API_KEYS=<account_id>:<token>` (comma separated for several accounts) in the server `.env`.
+- Free allowance: 10,000 neurons per Cloudflare account per day, shared by every model, reset at 00:00 UTC (05:30 IST). The default model `@cf/google/gemma-4-26b-a4b-it` gives roughly 560 replies a day; `@cf/meta/llama-3.1-8b-instruct-fp8` roughly 400; `@cf/meta/llama-3.2-3b-instruct` roughly 870 but weaker. Cloudflare reports no usage, so the bar in the console is an estimate.
+- Hover (or tap) the **i** next to any account for its limit bars: used / left, exhausted, time until reset and the clock time of the reset.
+- If WhatsApp goes quiet after sitting idle, the gateway now notices (health check every 45 s, three misses in a row) and reconnects from the saved session by itself. Look for "WhatsApp looks stalled" in the logs.

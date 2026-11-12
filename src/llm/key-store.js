@@ -14,8 +14,8 @@ export class KeyStore {
   /**
    * @param {{ pool: import('./key-pool.js').KeyPool, repo: object, secret: string, envKeys?: string, logger?: object }} o
    */
-  constructor({ pool, repo, secret, envKeys = '', logger }) {
-    Object.assign(this, { pool, repo, secret });
+  constructor({ pool, repo, secret, envKeys = '', logger, provider = 'groq', idPrefix = '' }) {
+    Object.assign(this, { pool, repo, secret, provider, idPrefix });
     this.envKeys = parseKeyList(envKeys);
     this.log = logger;
     this.unreadable = 0;
@@ -23,17 +23,17 @@ export class KeyStore {
 
   /** Rebuild the pool from env + database. `reenable` clears "rejected" marks (the owner just edited the list). */
   async load({ reenable = false } = {}) {
-    const list = this.envKeys.map((secret, i) => ({ id: `env:${i + 1}`, label: `env key ${i + 1}`, source: 'env', secret }));
+    const list = this.envKeys.map((secret, i) => ({ id: `${this.idPrefix}env:${i + 1}`, label: `env key ${i + 1}`, source: 'env', secret }));
     this.unreadable = 0;
     try {
-      for (const row of await this.repo.listLlmKeys()) {
+      for (const row of await this.repo.listLlmKeys(this.provider)) {
         const secret = decryptSecret(row.keyEnc, this.secret);
         if (!secret) {
           this.unreadable++; // JWT_SECRET changed since the key was saved
           continue;
         }
         if (list.some((k) => k.secret === secret)) continue;
-        list.push({ id: `db:${row.id}`, label: row.label, source: 'console', secret });
+        list.push({ id: `${this.idPrefix}db:${row.id}`, label: row.label, source: 'console', secret });
       }
     } catch (err) {
       this.log?.warn('Could not read the stored Groq keys', { err });

@@ -25,8 +25,8 @@ export class RoutedLlm {
    * @param {{ ollama: object, groq: object, getSettings: () => object, gates: { ollama: object, groq: object },
    *           localReady?: () => boolean, logger?: object }} o
    */
-  constructor({ ollama, groq, getSettings, gates, localReady = () => true, logger }) {
-    Object.assign(this, { ollama, groq, getSettings, gates, localReady });
+  constructor({ ollama, groq, cloudflare = null, getSettings, gates, localReady = () => true, logger }) {
+    Object.assign(this, { ollama, groq, cloudflare, getSettings, gates, localReady });
     this.log = logger;
     this.counters = { groq: 0, local: 0, fallbacks: 0, busy: 0 };
     this.lastFallback = null;
@@ -43,29 +43,47 @@ export class RoutedLlm {
     const p = req.provider ?? s.llmProvider;
     let models = req.groqModels ? parseModelList(req.groqModels) : req.groqModel ? [req.groqModel] : parseModelList(s.groqModels);
     if (!models.length) models = s.groqModel ? [s.groqModel] : [];
-    return { llmProvider: PROVIDERS.includes(p) ? p : 'auto', groqModels: models, strategy: s.groqStrategy === 'spread' ? 'spread' : 'priority' };
+    const cf = String(s.cloudflareModel || '').trim();
+    return { llmProvider: PROVIDERS.includes(p) ? p : 'auto', groqModels: models, cloudflareModels: cf ? [cf] : [], strategy: s.groqStrategy === 'spread' ? 'spread' : 'priority' };
   }
 
-  /** Keep the pool's strategy in step with the live setting (cheap; called before every use). */
+  /** Keep the pools' strategy and model lists in step with the live settings (cheap; called before every use). */
   #sync(s) {
     this.groq.pool.setStrategy?.(s.strategy);
     this.groq.pool.setModels?.(s.groqModels);
+    this.cloudflare?.pool.setStrategy?.(s.strategy);
+    this.cloudflare?.pool.setModels?.(s.cloudflareModels);
   }
 
-  /** Should this call try Groq at all? */
+  /** The hosted providers, in the order they are tried: Groq first, then Cloudflare Workers AI. */
+  #tiers(s) {
+    const tiers = [{ name: 'groq', client: this.groq, gate: this.gates.groq, models: s.groqModels }];
+    if (this.cloudflare) tiers.push({ name: 'cloudflare', client: this.cloudflare.client, gate: this.gates.cloudflare || this.gates.groq, models: s.cloudflareModels });
+    return tiers;
+  }
+
+  #keyCount() {
+    return this.groq.pool.size + (this.cloudflare?.pool.size ?? 0);
+  }
+
+  /** Should this call try the hosted providers at all? */
   #wantsGroq(s, priority = 1) {
     if (s.llmProvider === 'ollama') return false;
-    // Background work stays local while the local model is up: no Groq quota spent on summaries.
+    // Background work stays local while the local model is up: no hosted quota spent on summaries.
     if (priority >= 3 && this.localReady()) return false;
-    // Auto with no key at all is simply local; Groq-only with no key must say so (busy message), not silently go local.
-    return s.llmProvider === 'groq' || this.groq.pool.size > 0;
+    // Auto with no key at all is simply local; cloud-only with no key must say so (busy message), not silently go local.
+    return s.llmProvider === 'groq' || this.#keyCount() > 0;
   }
 
-  /** Is Groq selected (auto or Groq only) and at least one (account, model) ready right now? */
+  #anyUsable(s) {
+    return this.#tiers(s).some((t) => t.client.usable(t.models));
+  }
+
+  /** Is a hosted provider selected (auto or cloud only) and at least one (account, model) ready right now? */
   groqUsable() {
     const s = this.#settingsFor();
     this.#sync(s);
-    return s.llmProvider !== 'ollama' && this.groq.usable(s.groqModels);
+    return s.llmProvider !== 'ollama' && this.#anyUsable(s);
   }
 
   /** Does a reply need the local model to be loaded (it will be, or may be, answered locally)? */
@@ -74,7 +92,12 @@ export class RoutedLlm {
     if (s.llmProvider === 'ollama') return true;
     if (s.llmProvider === 'groq') return false;
     this.#sync(s);
-    return !this.groq.usable(s.groqModels); // auto: local only when nothing on Groq can serve right now
+    return !this.#anyUsable(s); // auto: local only when nothing hosted can serve right now
+  }
+
+  #nextAvailableMs(s) {
+    const waits = this.#tiers(s).map((t) => t.client.pool.nextAvailableMs(t.models)).filter((n) => n != null);
+    return waits.length ? Math.min(...waits) : null;
   }
 
   /** Pre-reading a prompt only helps a local model that keeps a prefix cache. */
@@ -91,7 +114,7 @@ export class RoutedLlm {
 
   async prefill(req) {
     // Think-ahead only helps the local model's prefix cache; live replies on Groq gain nothing from it.
-    if (this.#settingsFor(req).llmProvider !== 'ollama' && this.groq.pool.size > 0) return { promptTokens: 0, promptMs: 0, loadMs: 0, totalMs: 0, skipped: true };
+    if (this.#settingsFor(req).llmProvider !== 'ollama' && this.#keyCount() > 0) return { promptTokens: 0, promptMs: 0, loadMs: 0, totalMs: 0, skipped: true };
     return this.gates.ollama.run(() => this.ollama.prefill(req), { priority: 4, signal: req.signal });
   }
 
@@ -101,31 +124,31 @@ export class RoutedLlm {
     if (this.#wantsGroq(s, priority)) {
       this.#sync(s);
       const strict = s.llmProvider === 'groq';
-      if (this.groq.usable(s.groqModels)) {
+      let lastErr = null;
+      for (const tier of this.#tiers(s)) {
+        if (!tier.client.usable(tier.models)) continue;
         let started = false;
         try {
-          await this.gates.groq.acquire({ priority, signal: req.signal });
+          await tier.gate.acquire({ priority, signal: req.signal });
           try {
-            yield { type: 'meta', provider: 'groq', model: s.groqModels[0] }; // corrected by the client once an account/model accepts
-            for await (const ev of this.groq.chat({ ...req, models: s.groqModels })) {
+            yield { type: 'meta', provider: tier.name, model: tier.models[0] }; // corrected by the client once an account/model accepts
+            for await (const ev of tier.client.chat({ ...req, models: tier.models })) {
               if (ev.type === 'token') started = true;
               yield ev;
             }
-            this.counters.groq++;
+            this.counters[tier.name] = (this.counters[tier.name] || 0) + 1;
             return;
           } finally {
-            this.gates.groq.release();
+            tier.gate.release();
           }
         } catch (err) {
           if (req.signal?.aborted || started) throw err; // cancelled, or half a reply already went out: cannot switch mid-sentence
-          if (strict) return this.#busy(err);
-          this.#fellBack(err);
+          lastErr = err; // this provider failed before saying anything: the next one (or the local model) takes over
         }
-      } else if (strict) {
-        return this.#busy(new GroqUnavailableError(this.groq.pool.size ? 'every Groq account is rate-limited right now' : 'no Groq key configured', { kind: this.groq.pool.size ? 'exhausted' : 'no_keys', retryAfterMs: this.groq.pool.nextAvailableMs(s.groqModels) }));
-      } else {
-        this.#fellBack(new GroqUnavailableError('every Groq account is rate-limited right now', { kind: 'exhausted', retryAfterMs: this.groq.pool.nextAvailableMs(s.groqModels) }));
       }
+      const none = lastErr || new GroqUnavailableError(this.#keyCount() ? 'every hosted AI account is rate-limited right now' : 'no Groq or Cloudflare key configured', { kind: this.#keyCount() ? 'exhausted' : 'no_keys', retryAfterMs: this.#nextAvailableMs(s) });
+      if (strict) return this.#busy(none);
+      this.#fellBack(none);
     }
     yield { type: 'meta', provider: 'ollama', model: req.model };
     await this.gates.ollama.acquire({ priority, signal: req.signal });
@@ -159,10 +182,11 @@ export class RoutedLlm {
       groqModel: s.groqModels[0] ?? null,
       groqModels: s.groqModels,
       strategy: s.strategy,
-      groqReady: this.groq.usable(s.groqModels),
+      groqReady: this.#anyUsable(s),
       counters: { ...this.counters },
       lastFallback: this.lastFallback,
       keys: this.groq.pool.status(s.groqModels),
+      cloudflare: this.cloudflare ? { model: s.cloudflareModels[0] ?? null, ready: this.cloudflare.client.usable(s.cloudflareModels), keys: this.cloudflare.pool.status(s.cloudflareModels) } : null,
     };
   }
 }
