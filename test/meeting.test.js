@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { guessLocation, isMeetingRequest, looksLikeCommitment, meetingKind, mentionsMeeting, normalizeTimeText, parseWhen, formatWhen, heuristicItem } from '../src/brain/agenda.js';
+import { guessLocation, guessLocationFromContext, isMeetingRequest, looksLikeCommitment, meetingKind, mentionsMeeting, normalizeTimeText, parseWhen, formatWhen, heuristicItem } from '../src/brain/agenda.js';
 import { confirmationText, declineText, escapeHtml, inviteFamily, invitationData, invitationHtml, meetingAck } from '../src/brain/invite.js';
 import { createBrain, createMemoryStores } from '../src/brain/pipeline.js';
 import { KnowledgeBase } from '../src/rag/kb.js';
@@ -99,7 +99,11 @@ test('meeting reply never agrees, is in their language, and asks for details whe
   assert.match(meetingAck({ ...base, code: 'gu', dueAt }), /સાચા Sumit/);
   assert.match(meetingAck({ ...base, code: 'mr', dueAt }), /खऱ्या Sumit/);
   assert.match(meetingAck({ ...base, code: 'en' }), /Which day, time and place/, 'no time → asks');
-  assert.match(meetingAck({ ...base, code: 'en', dueAt, allDay: true }), /Which day, time and place/, 'date only → asks for the time');
+  const dateOnly = meetingAck({ ...base, code: 'en', dueAt, allDay: true, place: 'BKC Mumbai' });
+  assert.match(dateOnly, /What time works for you?/, 'date only → asks only for the time');
+  assert.match(dateOnly, /Wed, 11 Nov/, '…and says what was understood');
+  assert.match(dateOnly, /BKC Mumbai/);
+  assert.notEqual(dateOnly, meetingAck({ ...base, code: 'en' }), 'a follow-up question is not word-for-word the first one');
 });
 
 test('confirmation and decline texts', () => {
@@ -368,4 +372,11 @@ test('rescheduled confirmations say "updated" in every language and keep the new
   assert.match(confirmationText({ ...p, code: 'mr', rescheduled: true }), /^🔁 बदल, Aditya!/);
   assert.match(confirmationText({ ...p, code: 'gu', rescheduled: true }), /^🔁 ફેરફાર, Aditya!/);
   assert.match(confirmationText({ ...p, code: 'en' }), /^✅ Confirmed, Aditya!/, 'without the flag it is the normal confirmation');
+});
+
+test('"Tell him hi for me" never lends its words as a place; a meeting message does', () => {
+  assert.equal(guessLocation('Tell him hi for me'), null);
+  assert.equal(guessLocation('Schedule a meet with him for 10am tomorrow regarding a prospectus client'), null);
+  assert.equal(guessLocationFromContext(['Tell him hi for me'], { now: NOW, timeZone: TZ }), null);
+  assert.equal(guessLocationFromContext(['hello', 'I want to meet her at bkc mumbai', 'ok'], { now: NOW, timeZone: TZ }), 'Bkc mumbai');
 });

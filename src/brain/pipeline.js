@@ -9,7 +9,7 @@ import { INTENT_PROFILES, isFollowUp, resolveIntent } from './intent.js';
 import { replyLanguage, statedLanguagePreference } from './lang.js';
 import { MessageChunker } from './format.js';
 import { isRepeat, recentBubbles } from './repeat.js';
-import { asksAboutPlans, buildExtractionMessages, guessLocation, heuristicItem, isMeetingRequest, isPassOnRequest, meetingKind, mentionsMeeting, parseExtraction, parseWhen, resolveItems, wantsToMeet } from './agenda.js';
+import { asksAboutPlans, buildExtractionMessages, guessLocation, guessLocationFromContext, heuristicItem, isMeetingRequest, isPassOnRequest, meetingKind, mentionsMeeting, parseExtraction, parseWhen, resolveItems, wantsToMeet } from './agenda.js';
 import { meetingAck, passOnAck } from './invite.js';
 import { estimateTokens, normalize } from '../rag/text.js';
 import { ownerAliasList, renderPersona } from '../core/settings-schema.js';
@@ -207,7 +207,7 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
           kind: meetingKind(`${before}\n${text}`),
           dueAt: hit?.dueAt,
           allDay: hit?.allDay,
-          place: guessLocation(text) || guessLocation(before),
+          place: guessLocation(text) || guessLocationFromContext(theirMessages.slice(-3), { timeZone: tz }),
           timeZone: tz,
         });
       } else if (isPassOnRequest(text, { ownerNames: ownerAliasList(settings) })) {
@@ -429,9 +429,14 @@ Return ONLY the updated notes.`,
     const resolved = items ? resolveItems(items, { text, userTexts, now, timeZone }) : [];
     // A small model often leaves `location` empty even when the message names a place.
     // The place named in the CURRENT message wins; an earlier one is only a fallback (joining them let the older place win).
-    const place = guessLocation(text) || guessLocation(userTexts.slice(-3, -1).join('. '));
+    const place = guessLocation(text) || guessLocationFromContext(userTexts.slice(-4, -1), { now, timeZone });
     const withPlace = (list) => list.map((it) => (it.location || !place ? it : { ...it, location: place }));
-    if (resolved.length) return withPlace(resolved);
+    // A small model sometimes files "Confirm meeting with Aditya" as a to-do: a meeting with a date is an appointment.
+    const first = String(contactName || 'contact').trim().split(/\s+/)[0];
+    const KIND_TITLE = { call: 'Call with', meal: 'Meal with', meet: 'Meet' };
+    const ctx = [...userTexts.slice(-3), text].join('\n');
+    const asMeeting = (list) => list.map((it) => (it.kind === 'todo' && it.dueAt && mentionsMeeting(it.title) ? { ...it, kind: 'appointment', title: `${KIND_TITLE[meetingKind(ctx)]} ${first}` } : it));
+    if (resolved.length) return withPlace(asMeeting(resolved));
     // The model failed or found nothing: a plain "let's meet tomorrow at 5" is still worth keeping.
     const h = heuristicItem({ text, contextText: userTexts.slice(-4, -1).join('\n'), contactName, now, timeZone });
     return h && (items === null || h.kind === 'appointment') ? withPlace([h]) : [];

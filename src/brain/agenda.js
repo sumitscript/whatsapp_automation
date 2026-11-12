@@ -201,7 +201,9 @@ const PLACE_ADD = new RegExp(String.raw`\b${WHEN_BEFORE_ADD}\s+add\s+(?:the\s+)?
 // Hinglish puts the place first: "railway station pe milte hain", "office ke bahar", "ghar par". Up to 3 words
 // before the postposition, minus time words and pronouns.
 const POSTPOSITION = /\b((?:[a-z][a-z'-]*\s+){0,3}[a-z][a-z'-]*)\s+(?:pe|par|mein|me|ke paas|ke bahar|ke samne|ke pass|ke andar)\b/;
-const NOT_PLACE = new Set(['kal', 'aaj', 'parso', 'subah', 'shaam', 'raat', 'dopahar', 'baje', 'am', 'pm', 'tomorrow', 'today', 'tonight', 'at', 'on', 'ko', 'se', 'tak', 'tum', 'aap', 'main', 'mai', 'hum', 'kya', 'abhi', 'ye', 'yeh', 'wo', 'vo', 'is', 'us', 'mera', 'meri', 'mere', 'tumhare', 'aapke', 'ki', 'ka', 'ke', 'hai', 'hain', 'ho', 'to', 'toh', 'bhi', 'next', 'week', 'weekend', 'milte', 'milna', 'milenge', 'baat', 'call', 'meeting', 'meet', 'and', 'the', 'ek', 'do', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']);
+const NOT_PLACE = new Set(['kal', 'aaj', 'parso', 'subah', 'shaam', 'raat', 'dopahar', 'baje', 'am', 'pm', 'tomorrow', 'today', 'tonight', 'at', 'on', 'ko', 'se', 'tak', 'tum', 'aap', 'main', 'mai', 'hum', 'kya', 'abhi', 'ye', 'yeh', 'wo', 'vo', 'is', 'us', 'mera', 'meri', 'mere', 'tumhare', 'aapke', 'ki', 'ka', 'ke', 'hai', 'hain', 'ho', 'to', 'toh', 'bhi', 'next', 'week', 'weekend', 'milte', 'milna', 'milenge', 'baat', 'call', 'meeting', 'meet', 'and', 'the', 'ek', 'do', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+  // English function words: "Tell him hi for me" has the Hinglish-looking "... me" but no place in it
+  'him', 'her', 'his', 'hi', 'hello', 'hey', 'for', 'tell', 'say', 'ask', 'with', 'you', 'your', 'my', 'our', 'we', 'it', 'this', 'that', 'please', 'pls', 'ok', 'okay', 'yes', 'no', 'let', 'lets', 'give', 'me']);
 export function guessLocation(text) {
   const norm = normalizeTimeText(text);
   const m = PLACE_ADD.exec(norm) || PLACE.exec(norm);
@@ -217,6 +219,19 @@ export function guessLocation(text) {
   const v = words.slice(-3).join(' ');
   if (v.length < 3 || words.some((w) => NOT_PLACE.has(w) && w !== 'ke')) return null;
   return v.charAt(0).toUpperCase() + v.slice(1);
+}
+
+/**
+ * A place named in EARLIER messages, newest first: only messages that are about a meeting or carry a date/time count, so a
+ * chat line like "tell him hi for me" can never lend its words as the place.
+ */
+export function guessLocationFromContext(texts, { now = new Date(), timeZone = 'Asia/Kolkata' } = {}) {
+  for (const t of [...texts].reverse()) {
+    if (!mentionsMeeting(t) && !parseWhen(t, { now, timeZone })) continue;
+    const p = guessLocation(t);
+    if (p) return p;
+  }
+  return null;
 }
 
 /**

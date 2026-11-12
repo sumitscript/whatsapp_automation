@@ -518,7 +518,8 @@ export class Inbox {
     // Safety net: never send the same sentence twice within 3 minutes (a repeated model loop or a
     // redelivered event). Very short bubbles ("ok", an emoji) may legitimately repeat.
     const key = ev.text.trim().toLowerCase();
-    if (key.length >= 12) {
+    // Template replies (meeting acknowledgements) are exempt: asking the same question again is a legitimate answer.
+    if (key.length >= 12 && ev.meta?.model !== 'template') {
       const recent = (this.recentOut.get(chatId) || []).filter((r) => Date.now() - r.at < 180_000);
       if (recent.some((r) => r.key === key)) {
         this.log.warn('Dropped duplicate bubble', { chatId, jobId: ev.jobId });

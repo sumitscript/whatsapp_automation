@@ -31,6 +31,7 @@ const TEXT = {
     ack: "Got it {name}! 📅 {what}: {when}{place}\nI can't confirm anything for {owner} myself, so I've noted it and will pass it to the real {owner}. {owner} will confirm soon ✅",
     passOn: "Noted {name}! I can't act on this myself, so I'll pass it on to the real {owner}. {owner} will see it soon ✅",
     ask: "Noted {name}! Which day, time and place did you have in mind? I'll pass it to the real {owner} to confirm.",
+    askTime: "Noted {name}! {what}: {when}{place}\nWhat time works for you? I'll pass it to the real {owner} to confirm.",
     confirmHead: '✅ Confirmed, {name}! {owner} has accepted: {title}',
     updatedHead: '🔁 Updated, {name}! {owner} has confirmed the new time: {title}',
     confirmTail: 'See you then 🙂',
@@ -40,6 +41,7 @@ const TEXT = {
     ack: 'Theek hai {name}! 📅 {what}: {when}{place}\nIse note kar liya hai aur asli {owner} tak pahuncha diya jayega. {owner} khud confirm karenge ✅',
     passOn: 'Note kar liya {name}! Yeh baat asli {owner} tak pahuncha di jayegi. {owner} jald dekh lenge ✅',
     ask: 'Note kar liya {name}! Kis din, kitne baje aur kahan milna hai? Asli {owner} tak pahuncha diya jayega, {owner} confirm karenge.',
+    askTime: 'Note kar liya {name}! {what}: {when}{place}\nKitne baje ka time theek rahega? Asli {owner} tak pahuncha diya jayega, {owner} confirm karenge.',
     confirmHead: '✅ Confirm ho gaya, {name}! {owner} ne haan kar di hai: {title}',
     updatedHead: '🔁 Update, {name}! {owner} ne naya time confirm kiya hai: {title}',
     confirmTail: 'Milte hain 🙂',
@@ -49,6 +51,7 @@ const TEXT = {
     ack: 'ठीक है {name}! 📅 {what}: {when}{place}\nइसे नोट कर लिया है और असली {owner} तक पहुँचा दिया जाएगा। {owner} खुद पुष्टि करेंगे ✅',
     passOn: 'नोट कर लिया {name}! यह बात असली {owner} तक पहुँचा दी जाएगी। {owner} जल्द देख लेंगे ✅',
     ask: 'नोट कर लिया {name}! किस दिन, कितने बजे और कहाँ मिलना है? असली {owner} तक पहुँचा दिया जाएगा, {owner} पुष्टि करेंगे।',
+    askTime: 'नोट कर लिया {name}! {what}: {when}{place}\nकितने बजे का समय ठीक रहेगा? असली {owner} तक पहुँचा दिया जाएगा, {owner} पुष्टि करेंगे।',
     confirmHead: '✅ पक्का, {name}! {owner} ने मंज़ूरी दे दी है: {title}',
     updatedHead: '🔁 बदलाव, {name}! {owner} ने नया समय पक्का किया है: {title}',
     confirmTail: 'तब मिलते हैं 🙂',
@@ -58,6 +61,7 @@ const TEXT = {
     ack: 'ठीक आहे {name}! 📅 {what}: {when}{place}\nहे नोंदवून घेतले आहे आणि खऱ्या {owner} पर्यंत पोहोचवले जाईल. {owner} स्वतः कळवतील ✅',
     passOn: 'नोंदवून घेतले {name}! हे खऱ्या {owner} पर्यंत पोहोचवले जाईल. {owner} लवकरच पाहतील ✅',
     ask: 'नोंदवून घेतले {name}! कोणत्या दिवशी, किती वाजता आणि कुठे भेटायचे? खऱ्या {owner} पर्यंत पोहोचवले जाईल, {owner} कळवतील.',
+    askTime: 'नोंदवून घेतले {name}! {what}: {when}{place}\nकिती वाजता सोयीचे आहे? खऱ्या {owner} पर्यंत पोहोचवले जाईल, {owner} कळवतील.',
     confirmHead: '✅ निश्चित, {name}! {owner} यांनी मान्य केले आहे: {title}',
     updatedHead: '🔁 बदल, {name}! {owner} यांनी नवीन वेळ निश्चित केली आहे: {title}',
     confirmTail: 'तेव्हा भेटू 🙂',
@@ -67,6 +71,7 @@ const TEXT = {
     ack: 'ઠીક છે {name}! 📅 {what}: {when}{place}\nઆ નોંધી લીધું છે અને સાચા {owner} સુધી પહોંચાડવામાં આવશે. {owner} પોતે જણાવશે ✅',
     passOn: 'નોંધી લીધું {name}! આ વાત સાચા {owner} સુધી પહોંચાડવામાં આવશે. {owner} જલ્દી જોશે ✅',
     ask: 'નોંધી લીધું {name}! કયા દિવસે, કેટલા વાગ્યે અને ક્યાં મળવું છે? સાચા {owner} સુધી પહોંચાડીશું, {owner} જણાવશે.',
+    askTime: 'નોંધી લીધું {name}! {what}: {when}{place}\nકેટલા વાગ્યે અનુકૂળ રહેશે? સાચા {owner} સુધી પહોંચાડીશું, {owner} જણાવશે.',
     confirmHead: '✅ પાક્કું, {name}! {owner} એ મંજૂરી આપી છે: {title}',
     updatedHead: '🔁 ફેરફાર, {name}! {owner} એ નવો સમય પાક્કો કર્યો છે: {title}',
     confirmTail: 'ત્યારે મળીએ 🙂',
@@ -108,8 +113,10 @@ function vars({ code, name, owner, kind = 'meet', dueAt, allDay, place, title, t
  */
 export function meetingAck(p) {
   const { fam, v } = vars(p);
-  const known = p.dueAt && !p.allDay;
-  return fill(TEXT[fam][known ? 'ack' : 'ask'], v);
+  if (p.dueAt && !p.allDay) return fill(TEXT[fam].ack, v);
+  // a date but no time: say what was understood and ask only for the time (also keeps a repeated question from being word-for-word identical)
+  if (p.dueAt && p.allDay) return fill(TEXT[fam].askTime, v);
+  return fill(TEXT[fam].ask, v);
 }
 
 /** Reply to "tell him / remind him / pass it on": noted and passed on, never agreeing or committing for the owner. */
