@@ -74,7 +74,7 @@ export function createRedisAnswerCache(redis, { ttlSec = config.memory.answerCac
     async get(k) {
       const raw = await redis.get(keys.answer(k));
       if (!raw) return null;
-      redis.incr(keys.cacheHits(new Date().toISOString().slice(0, 10))).catch(() => {});
+      if (String(k).startsWith('ans:')) redis.incr(keys.cacheHits(new Date().toISOString().slice(0, 10))).catch(() => {}); // small state like "waiting for a time" is not a cache hit
       return JSON.parse(raw);
     },
     async set(k, v) {

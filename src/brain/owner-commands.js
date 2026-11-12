@@ -154,3 +154,13 @@ export function ownerSlotsText({ slotsLine, meetings, timeZone }) {
   const booked = meetings.slice(0, 6).map((m) => `• ${formatWhen(m.startsAt, timeZone, false)}: ${m.title}${m.contactName ? ` (${m.contactName})` : ''}${m.status === 'pending' ? ' (waiting)' : ''}`);
   return `🗓 Your free times:\n${slotsLine || 'Nothing free in the next 7 days.'}${booked.length ? `\n\nBooked:\n${booked.join('\n')}` : ''}`;
 }
+
+/**
+ * One message for a burst of requests (the first few are sent one by one, the rest are gathered): every request keeps its
+ * number, so "ok 12" still works for each, and "ok all" takes them all.
+ */
+export function ownerDigest(items, { timeZone }) {
+  const lines = items.slice(0, 25).map((it) => `*#${it.id}* ${it.kind === 'appointment' ? '📅' : '📝'} ${who(it)}: ${whenOf(it, timeZone)}${it.location ? ` · ${it.location}` : ''}`);
+  const more = items.length > 25 ? `\n…and ${items.length - 25} more (send "pending")` : '';
+  return `📥 *${items.length} new request${items.length === 1 ? '' : 's'}* came in a burst:\n${lines.join('\n')}${more}\n\nReply "ok <number>" to confirm one, "ok all" for all of them, "no <number>" to decline, "slots" for your free times. A clash is checked when you confirm.`;
+}

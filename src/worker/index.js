@@ -20,7 +20,7 @@ import { RoutedLlm } from '../llm/router.js';
 import { UsageStore } from '../llm/usage.js';
 import { createBrain } from '../brain/pipeline.js';
 import { createAvailability } from '../brain/availability.js';
-import { looksLikeCommitmentInContext, sameItem } from '../brain/agenda.js';
+import { looksLikeCommitmentInContext, looksLikeRefinement, meetingDraft, sameItem } from '../brain/agenda.js';
 
 const log = logger.child({ component: 'worker' });
 const STALE_JOB_MS = 5 * 60_000; // don't answer messages that sat in the queue during downtime
@@ -123,7 +123,7 @@ const publishStatus = () =>
   redis
     .set(
       keys.workerStatus,
-      JSON.stringify({ at: Date.now(), startedAt, model: modelState, inFlight, lanes: lanes.size, folding, queuedFolds: foldQueue.size + agendaQueue.size, concurrency: config.ollama.concurrency, bus: bus.driver, kb: kb.version, lastReply, lastError, llm: llmGated.status() }),
+      JSON.stringify({ at: Date.now(), startedAt, model: modelState, inFlight, lanes: lanes.size, folding, queuedFolds: foldQueue.size + agendaQueue.length, concurrency: config.ollama.concurrency, bus: bus.driver, kb: kb.version, lastReply, lastError, llm: llmGated.status() }),
       'EX',
       20,
     )
@@ -193,6 +193,7 @@ async function handleJob(job) {
   inFlight++;
   let superseded = false;
   let doneIntent = null;
+  let doneMeeting = null;
   try {
     const longTerm = s.memoryEnabled ? await repo.getMemory(job.chatId).catch(() => null) : null;
     const stream = brain.respond({
@@ -209,6 +210,7 @@ async function handleJob(job) {
         await out({ type: 'chunk', index: ev.index, text: ev.text, meta: ev.meta });
       } else if (ev.type === 'done') {
         doneIntent = ev.meta.intent;
+        doneMeeting = ev.meta.meeting || null;
         lastReply = { at: Date.now(), latencyMs: ev.meta.latencyMs, firstChunkMs: ev.meta.firstChunkMs, tokensPerSec: ev.meta.tokensPerSec ?? null, cached: !!ev.meta.cached, model: ev.meta.model };
         await out({ type: 'done', meta: ev.meta });
       }
@@ -242,22 +244,42 @@ async function handleJob(job) {
   // details often come as separate messages ("I want to meet" … "tomorrow at six near the office").
   const earlierUserTexts = turnsNow.filter((t) => t.role === 'user').map((t) => t.content).slice(0, -1);
   // (A request for a time that is not available is not filed: the person was asked to pick a free slot, and that message will be.)
-  if (s.agendaEnabled && doneIntent !== 'meeting_unavailable' && looksLikeCommitmentInContext(text, earlierUserTexts)) agendaQueue.set(job.chatId, { text, contactName: job.contactName || null, at: Date.now() });
+  if (s.agendaEnabled && doneIntent !== 'meeting_unavailable') {
+    if (doneMeeting) {
+      // The reply already understood the request (time and place): file it now, deterministically.
+      await saveAgendaItems(job.chatId, [meetingDraft({ meeting: doneMeeting, text, contactName: job.contactName })], { text, refinement: looksLikeRefinement(text) }).catch((err) => log.warn('Could not file the meeting request', { chatId: job.chatId, err }));
+    } else if (looksLikeCommitmentInContext(text, earlierUserTexts)) {
+      queueAgenda(job.chatId, { text, contactName: job.contactName || null, turns: turnsNow.slice(-8), at: Date.now() });
+    }
+  }
 }
 
 // ---- Agenda: appointments / to-dos spotted in chats ----
-const agendaQueue = new Map(); // chatId → latest message that looks like a commitment
-async function extractAgendaFor(chatId, { text, contactName }, signal) {
+// Every message that may hold a commitment waits here (it used to be one slot per chat: in a burst each new message overwrote the
+// one before, and requests the bot had just promised to pass on were never filed). Capped, oldest dropped first.
+const agendaQueue = [];
+const AGENDA_QUEUE_MAX = 300;
+function queueAgenda(chatId, req) {
+  agendaQueue.push({ chatId, ...req });
+  if (agendaQueue.length > AGENDA_QUEUE_MAX) log.warn('Agenda queue full: dropping the oldest message', { dropped: agendaQueue.shift().chatId });
+}
+async function extractAgendaFor(chatId, { text, contactName, turns: snapshot }, signal) {
   const s = settings.get();
   if (!s.agendaEnabled) return;
   await modelReady;
-  const turns = await memory.get(chatId);
+  // the conversation as it was when this message arrived (later messages of a burst must not leak into its extraction)
+  const turns = snapshot?.length ? snapshot : await memory.get(chatId);
   const found = await brain.extractAgenda({ turns, text, contactName, settings: s, signal });
   if (!found.length) return log.debug('No agenda items found', { chatId });
+  await saveAgendaItems(chatId, found, { text, refinement: looksLikeRefinement(text) });
+}
+
+// Store items found in a message: a request for the same time (or a refinement of an earlier one) updates the item, anything else is new.
+async function saveAgendaItems(chatId, found, { text, refinement = false }) {
   const existing = await repo.listAgenda({ view: 'open', chatId });
   for (const it of found) {
-    const draft = { ...it, chatId, sourceMessage: text.slice(0, 500), source: 'ai' };
-    const same = existing.find((e) => sameItem(e, draft));
+    const draft = { ...it, chatId, sourceMessage: String(text).slice(0, 500), source: 'ai' };
+    const same = existing.find((e) => sameItem(e, draft, { refinement }));
     if (same) {
       // The person is refining an earlier proposal ("make it 6pm"): keep the item, update what changed.
       const changed = (draft.dueAt && (!same.dueAt || new Date(draft.dueAt).getTime() !== new Date(same.dueAt).getTime())) || (draft.location && draft.location !== same.location) || (draft.title && draft.title !== same.title);
@@ -297,22 +319,22 @@ async function fold(chatId, { all }, signal) {
   await bus.publish(TOPICS.outbound, chatId, { type: 'memory', chatId });
 }
 setInterval(async () => {
-  if (folding || inFlight > 0 || (!foldQueue.size && !agendaQueue.size)) return;
+  if (folding || inFlight > 0 || (!foldQueue.size && !agendaQueue.length)) return;
   if (Date.now() - lastActivity < BG_QUIET_MS) return; // someone is mid-conversation: stay out of the way
   folding = true;
   const ctl = (bgCtl = new AbortController());
   let preempted = false;
   try {
-    if (agendaQueue.size) {
+    if (agendaQueue.length) {
       // Agenda first: a meeting request is more time-sensitive than a memory summary.
-      const [chatId, req] = agendaQueue.entries().next().value;
-      agendaQueue.delete(chatId);
+      const req = agendaQueue.shift();
+      const chatId = req.chatId;
       try {
         await extractAgendaFor(chatId, req, ctl.signal);
       } catch (err) {
         if (ctl.signal.aborted) {
           preempted = true;
-          if (!agendaQueue.has(chatId)) agendaQueue.set(chatId, req); // a live message came in: do it later
+          agendaQueue.unshift(req); // a live message came in: do it later
           log.debug('Agenda extraction pre-empted by a live message; re-queued', { chatId });
         } else log.warn('Agenda extraction failed', { chatId, err });
       }

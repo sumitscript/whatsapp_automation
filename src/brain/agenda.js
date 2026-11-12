@@ -621,15 +621,40 @@ export const normalizeTitle = (t) =>
     .trim();
 
 /** Is `b` (new) the same commitment as `a` (stored)? Same chat + kind, and either close in time or alike in words. */
-export function sameItem(a, b) {
+export function sameItem(a, b, { refinement = false } = {}) {
   if ((a.chatId ?? null) !== (b.chatId ?? null) || a.kind !== b.kind) return false;
-  if (a.dueAt && b.dueAt && Math.abs(new Date(a.dueAt) - new Date(b.dueAt)) <= 2 * 3600_000) return true;
   const wa = new Set(normalizeTitle(a.title).split(' ').filter(Boolean));
   const wb = new Set(normalizeTitle(b.title).split(' ').filter(Boolean));
-  if (!wa.size || !wb.size) return false;
   let same = 0;
   for (const w of wa) if (wb.has(w)) same++;
-  return same / Math.max(wa.size, wb.size) >= 0.6;
+  const alikeTitle = wa.size > 0 && wb.size > 0 && same / Math.max(wa.size, wb.size) >= 0.6;
+  if (a.dueAt && b.dueAt) {
+    if (Math.abs(new Date(a.dueAt) - new Date(b.dueAt)) <= 2 * 3600_000) return true; // the same time: the same request
+    // Another time is another meeting ("Meet Aditya" on the 16th and on the 20th are two), unless the person is
+    // changing the earlier one ("make it 6pm", "actually the 17th instead", "move it").
+    return refinement && alikeTitle;
+  }
+  return alikeTitle;
+}
+
+const REFINEMENT = /\b(?:make it|change(?:d)?|instead|actually|rather|reschedul\w*|move(?:d)?|shift(?:ed)?|postpone\w*|prepone\w*|not\s+\d|badal\w*|aage|peeche)\b/i;
+/** The message changes an earlier request instead of making a new one. */
+export const looksLikeRefinement = (text) => REFINEMENT.test(String(text ?? ''));
+
+/**
+ * The agenda item for a meeting reply the pipeline already understood (its done-meta carries { dueAt, dueText, place, kind }):
+ * no model, no queue, so a burst of requests cannot lose any of them.
+ */
+export function meetingDraft({ meeting, text, contactName }) {
+  return {
+    kind: 'appointment',
+    title: `${KIND_TITLE[meeting.kind] || KIND_TITLE.meet} ${firstName(contactName || 'contact')}`,
+    details: clip(String(text ?? '').trim(), 300) || null,
+    dueAt: new Date(meeting.dueAt),
+    allDay: false,
+    dueText: meeting.dueText || null,
+    location: meeting.place || null,
+  };
 }
 
 // -------------------------------------------------------------- API plumbing

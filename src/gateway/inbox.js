@@ -12,7 +12,7 @@ import { deleteKeysMatching, KeyedQueue, normalizePhone, phoneFromWid, sleep, ui
 import { renderTemplate } from '../core/settings-schema.js';
 import { helpText, parseCommand } from '../brain/commands.js';
 import { TOPICS } from '../bus/index.js';
-import { ownerAsk, ownerHelp, ownerNotice, ownerPendingList, ownerResultLine, ownerSlotsText, parseOwnerCommand, resolveDecision } from '../brain/owner-commands.js';
+import { ownerAsk, ownerDigest, ownerHelp, ownerNotice, ownerPendingList, ownerResultLine, ownerSlotsText, parseOwnerCommand, resolveDecision } from '../brain/owner-commands.js';
 import { formatWhen } from '../brain/agenda.js';
 import { clashLines, slotsText } from '../brain/slots.js';
 import { replyLanguage } from '../brain/lang.js';
@@ -57,6 +57,9 @@ export class Inbox {
     this.lastErrorNotice = new Map();
     this.lastUnsupported = new Map();
     this.lastBusyNotice = new Map();
+    this.noticeTimes = []; // when the owner was last pinged about a request (burst control)
+    this.digest = []; // agenda ids waiting to be sent as one digest
+    this.digestTimer = null;
     this.selfChat = new SelfChatTracker(); // finds the owner's own "Message yourself" chat (a LID, not the phone id)
     this.selfChatsLoaded = null;
 
@@ -450,6 +453,32 @@ export class Inbox {
     // "Sorry, Mehul can't make this one…").
   }
 
+  /**
+   * The first few requests of a burst are sent to the owner one by one; once three have gone out within a minute the rest are
+   * gathered into a single digest (30 requests in two minutes used to mean 30 WhatsApp pings). Returns true when this one
+   * should be sent now.
+   */
+  #noticeNow(itemId) {
+    const now = Date.now();
+    this.noticeTimes = this.noticeTimes.filter((t) => now - t < 60_000);
+    if (this.noticeTimes.length < 3 && !this.digest.length) {
+      this.noticeTimes.push(now);
+      return true;
+    }
+    if (!this.digest.includes(itemId)) this.digest.push(itemId);
+    clearTimeout(this.digestTimer);
+    this.digestTimer = setTimeout(() => this.#flushDigest().catch((err) => this.log.warn('Owner digest failed', { err })), this.digest.length >= 15 ? 0 : 25_000);
+    this.digestTimer.unref?.();
+    return false;
+  }
+
+  async #flushDigest() {
+    const ids = this.digest.splice(0);
+    this.noticeTimes = [];
+    const items = (await Promise.all(ids.map((id) => this.repo.getAgendaItem(id)))).filter((i) => i && i.status === 'pending');
+    if (items.length) await this.#sendToOwner(ownerDigest(items, { timeZone: this.settings.get().timezone }));
+  }
+
   async #onAgenda(ev) {
     this.hub.emit('agenda:update', { id: ev.itemId, created: !!ev.created });
     const s = this.settings.get();
@@ -457,6 +486,7 @@ export class Inbox {
     if (!s.notifyOwnerOnAgenda || (!ev.created && !ev.changed)) return;
     const item = await this.repo.getAgendaItem(ev.itemId);
     if (!item || (!ev.created && item.status !== 'pending')) return;
+    if (!this.#noticeNow(item.id)) return; // part of a burst: it will be in the digest
     // A request that lands on a confirmed meeting, a block or outside working hours says so, with free times to offer instead.
     let clash = [];
     let blocking = false;

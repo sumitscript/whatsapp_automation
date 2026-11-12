@@ -9,7 +9,7 @@ import { INTENT_PROFILES, isFollowUp, resolveIntent } from './intent.js';
 import { replyLanguage, statedLanguagePreference } from './lang.js';
 import { MessageChunker } from './format.js';
 import { isRepeat, recentBubbles } from './repeat.js';
-import { asksAboutPlans, buildExtractionMessages, guessLocation, guessLocationFromContext, heuristicItem, isMeetingRequest, isPassOnRequest, meetingKind, mentionsMeeting, parseExtraction, parseWhen, resolveItems, wantsToMeet } from './agenda.js';
+import { asksAboutPlans, buildExtractionMessages, guessLocation, guessLocationFromContext, heuristicItem, localParts, isMeetingRequest, isPassOnRequest, meetingKind, mentionsMeeting, parseExtraction, parseWhen, resolveItems, wantsToMeet } from './agenda.js';
 import { meetingAck, passOnAck, slotTakenAck } from './invite.js';
 import { slotsText } from './slots.js';
 import { estimateTokens, normalize } from '../rag/text.js';
@@ -195,12 +195,26 @@ export function createBrain({ kb, llm, memory, cache, logger, availability = nul
     // intent qualifies except the ones that are clearly something else (code, maths, jokes, stories).
     if (settings.meetingAck !== false && !['coding', 'creative', 'math', 'joke'].includes(intent) && !asksAboutPlans(text) && text.length <= 400) {
       const tz = settings.timezone || 'Asia/Kolkata';
-      const hit = parseWhen(text, { timeZone: tz });
+      let hit = parseWhen(text, { timeZone: tz });
       const before = theirMessages.slice(-3).join('\n');
+      // We just offered free times or asked for one: a bare "12 pm" or "ok" belongs to that conversation, not to the model
+      // (which answered "12 pm is booked" on its own). A time that matches exactly one offered slot picks that slot.
+      const mtgKey = chatId ? `mtg:${chatId}` : null;
+      const offered = mtgKey ? await cache.get(mtgKey).catch(() => null) : null;
+      const followingOffer = !!offered?.at && Date.now() - offered.at < 30 * 60_000;
+      if (followingOffer && hit && !hit.hasDay && offered.slots?.length) {
+        const want = localParts(hit.dueAt, tz);
+        const same = offered.slots.map((x) => new Date(x)).filter((d) => {
+          const p = localParts(d, tz);
+          return p.h === want.h && p.mi === want.mi;
+        });
+        if (same.length === 1) hit = { ...hit, dueAt: same[0], hasDay: true, allDay: false };
+      }
       let ack = null;
       let ackIntent = 'meeting';
+      let offeredNow = [];
       // "I want to meet you" / "mujhe aapse milna hai" (no time yet) is answered with the "which day, time and place?" template too.
-      if (isMeetingRequest(text) || (hit && before && mentionsMeeting(before)) || wantsToMeet(text)) {
+      if (isMeetingRequest(text) || (hit && before && mentionsMeeting(before)) || wantsToMeet(text) || (followingOffer && hit)) {
         ack = meetingAck({
           code: lang.code,
           name: contactName,
@@ -220,6 +234,7 @@ export function createBrain({ kb, llm, memory, cache, logger, availability = nul
           });
           if (av && !av.ok) {
             const free = await availability.freeSlots({ count: 4, perDay: 2 }).catch(() => []);
+            offeredNow = free;
             ack = slotTakenAck({ code: lang.code, name: contactName, owner: settings.ownerName, dueAt: hit.dueAt, allDay: false, timeZone: tz, slots: slotsText(free, tz, ['hi', 'mr', 'gu'].includes(lang.code) ? lang.code : 'en') });
             ackIntent = 'meeting_unavailable';
           }
@@ -231,6 +246,15 @@ export function createBrain({ kb, llm, memory, cache, logger, availability = nul
       }
       if (ack) {
         const meta = { model: 'template', intent: ackIntent, inheritedIntent: false, language: lang.code, sources: [], retrievalMs: 0, cached: false };
+        // Remember that we are waiting for an answer (a time, or a choice among the offered slots); a complete request clears it.
+        if (mtgKey && ackIntent !== 'pass_on') {
+          const waiting = ackIntent === 'meeting_unavailable' || !hit || hit.allDay;
+          await cache.set(mtgKey, waiting ? { at: Date.now(), slots: offeredNow.map((d) => d.toISOString()) } : { at: 0 }).catch(() => {});
+        }
+        // A complete, free request travels with the reply so the worker files it at once, without the model and without a queue.
+        if (ackIntent === 'meeting' && hit && !hit.allDay) {
+          meta.meeting = { dueAt: hit.dueAt.toISOString(), dueText: hit.matched || null, place: guessLocation(text) || guessLocationFromContext(theirMessages.slice(-3), { timeZone: tz }), kind: meetingKind(`${before}\n${text}`) };
+        }
         yield { type: 'chunk', text: ack, index: 0, meta };
         if (chatId) await memory.append(chatId, [{ role: 'user', content: text }, { role: 'assistant', content: ack }]);
         const latencyMs = Math.round(performance.now() - started);
