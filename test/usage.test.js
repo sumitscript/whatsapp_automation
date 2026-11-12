@@ -4,7 +4,7 @@ import { UsageStore, dayKey } from '../src/llm/usage.js';
 import { KeyPool } from '../src/llm/key-pool.js';
 import { GroqClient } from '../src/llm/groq.js';
 import { statedLanguagePreference, replyLanguage } from '../src/brain/lang.js';
-import { isMeetingRequest, mentionsMeeting, wantsToMeet, parseWhen, formatWhen } from '../src/brain/agenda.js';
+import { guessLocation, isMeetingRequest, mentionsMeeting, wantsToMeet, parseWhen, formatWhen } from '../src/brain/agenda.js';
 import { meetingAck } from '../src/brain/invite.js';
 
 // ------------------------------------------------------------------ usage counters
@@ -135,4 +135,9 @@ test('asking the twin to fix a date / book a slot is a meeting request, never ag
   assert.doesNotMatch(ack, /lock|sure|done|booked|confirmed/i, 'it does not agree on the owner\'s behalf');
   assert.equal(isMeetingRequest('the fix for this bug is in the book I read'), false);
   assert.ok(formatWhen(hit.dueAt, 'Asia/Kolkata', true));
+});
+
+test('a booking request does not lend its words as a place', () => {
+  for (const x of ['Fix a date for me on next monday', 'book a slot for us on friday', 'can you fix a time for me', 'Tell him hi for me']) assert.equal(guessLocation(x), null, x);
+  assert.equal(guessLocation('fix a date on friday at the railway station'), 'Railway station');
 });

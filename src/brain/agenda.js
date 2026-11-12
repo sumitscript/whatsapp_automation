@@ -203,7 +203,9 @@ const PLACE_ADD = new RegExp(String.raw`\b${WHEN_BEFORE_ADD}\s+add\s+(?:the\s+)?
 const POSTPOSITION = /\b((?:[a-z][a-z'-]*\s+){0,3}[a-z][a-z'-]*)\s+(?:pe|par|mein|me|ke paas|ke bahar|ke samne|ke pass|ke andar)\b/;
 const NOT_PLACE = new Set(['kal', 'aaj', 'parso', 'subah', 'shaam', 'raat', 'dopahar', 'baje', 'am', 'pm', 'tomorrow', 'today', 'tonight', 'at', 'on', 'ko', 'se', 'tak', 'tum', 'aap', 'main', 'mai', 'hum', 'kya', 'abhi', 'ye', 'yeh', 'wo', 'vo', 'is', 'us', 'mera', 'meri', 'mere', 'tumhare', 'aapke', 'ki', 'ka', 'ke', 'hai', 'hain', 'ho', 'to', 'toh', 'bhi', 'next', 'week', 'weekend', 'milte', 'milna', 'milenge', 'baat', 'call', 'meeting', 'meet', 'and', 'the', 'ek', 'do', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
   // English function words: "Tell him hi for me" has the Hinglish-looking "... me" but no place in it
-  'him', 'her', 'his', 'hi', 'hello', 'hey', 'for', 'tell', 'say', 'ask', 'with', 'you', 'your', 'my', 'our', 'we', 'it', 'this', 'that', 'please', 'pls', 'ok', 'okay', 'yes', 'no', 'let', 'lets', 'give', 'me']);
+  'him', 'her', 'his', 'hi', 'hello', 'hey', 'for', 'tell', 'say', 'ask', 'with', 'you', 'your', 'my', 'our', 'we', 'it', 'this', 'that', 'please', 'pls', 'ok', 'okay', 'yes', 'no', 'let', 'lets', 'give', 'me',
+  // asking for a booking is not a place: "fix a date for me", "book a slot for us"
+  'fix', 'a', 'an', 'date', 'time', 'slot', 'book', 'set', 'up', 'arrange', 'appointment', 'schedule', 'plan', 'us', 'them', 'him', 'can', 'could', 'would', 'will', 'pls']);
 export function guessLocation(text) {
   const norm = normalizeTimeText(text);
   const m = PLACE_ADD.exec(norm) || PLACE.exec(norm);
