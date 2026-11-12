@@ -36,15 +36,19 @@ export const DEFAULT_GOODBYE = 'Bye {name}! 👋 It was fun chatting. Send {star
 
 export const DEFAULT_UNSUPPORTED =
   "Hey {name}! I can only read text messages right now, so I can't open {kind} 🙈 Could you type it out for me? If it's urgent, I'll let the real {owner} know.";
+// Sent instead of an AI reply when the provider is "Groq only" and Groq cannot answer (every key rate-limited, or Groq is down).
+export const DEFAULT_GROQ_BUSY =
+  "Hey {name}! {persona} is on a short break right now 🌴 It's answering a lot of chats at once. Please message again in a little while, and the real {owner} will see this chat too 🙂";
 export const DEFAULT_TIMEOUT =
   "Hey {name}, it's been quiet for a while, so I'm signing off for now 👋 Send {start} whenever you want to chat again — the real {owner} will see this chat too.";
 
 export const DEFAULT_SETTINGS = Object.freeze({
   replyMode: 'session', // session (/hi … /bye) | all | off
   model: 'gemma3:4b',
-  llmProvider: 'ollama', // 'ollama' = local model only | 'groq' = hosted Groq (several keys, rotated) with the local model as the fallback
+  llmProvider: 'auto', // 'auto' = Groq when a key exists, the local model when Groq is exhausted or has no key | 'ollama' = local only | 'groq' = Groq only (see groqBusyMessage)
   groqModel: 'llama-3.3-70b-versatile', // model id on Groq (see the model list in Settings)
-  groqFallback: true, // when every Groq key is rate-limited or Groq is down, answer with the local model instead of failing
+  groqFallback: true, // deprecated and ignored (kept so older saved settings stay valid): the provider choice decides now
+  groqBusyMessage: DEFAULT_GROQ_BUSY, // the reply in "Groq only" mode when Groq cannot answer ({name} {persona} {owner})
   temperature: 0.7,
   maxTokens: 320,
   historyTurns: 10, // messages kept verbatim (older ones are folded into long-term memory)
@@ -91,9 +95,10 @@ const RULES = {
   replyMode: (v) => (v === 'whitelist' ? 'session' : ['session', 'all', 'off'].includes(v) ? v : undefined),
   model: (v) => (typeof v === 'string' && /^[\w.\-/:]{1,100}$/.test(v) ? v : undefined),
   temperature: (v) => numIn(v, 0, 1.5),
-  llmProvider: (v) => (v === 'ollama' || v === 'groq' ? v : undefined),
+  llmProvider: (v) => (v === 'auto' || v === 'ollama' || v === 'groq' ? v : undefined),
   groqModel: (v) => (typeof v === 'string' && /^[\w.\-/:]{1,100}$/.test(v.trim()) ? v.trim() : undefined),
   groqFallback: bool,
+  groqBusyMessage: text(1, 1000),
   maxTokens: (v) => intIn(v, 32, 2048),
   historyTurns: (v) => intIn(v, 0, 40),
   historyTokens: (v) => intIn(v, 200, 6000),

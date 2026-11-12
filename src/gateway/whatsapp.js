@@ -7,6 +7,7 @@ import path from 'node:path';
 import QRCode from 'qrcode';
 import wweb from 'whatsapp-web.js';
 import { SeenIds } from '../core/util.js';
+import { trySendStrategies } from '../core/image-send.js';
 
 const { Client, LocalAuth, MessageMedia } = wweb;
 
@@ -31,6 +32,9 @@ export class WhatsAppManager extends EventEmitter {
     this.connectToken = 0;
     this.seenEvents = new SeenIds({ ttlMs: 10 * 60_000, max: 2000 });
     this.lastReadyRestartAt = 0;
+    this.lastImageStrategy = null; // the image-send way that worked last (tried first next time)
+    this.imageWarned = new Set(); // "strategy:error" already logged
+    this.ownChatCache = new Map(); // chatId → is it the owner's own chat (Contact.isMe)
   }
 
   status() {
@@ -217,6 +221,7 @@ export class WhatsAppManager extends EventEmitter {
   async logout() {
     this.manualStop = true;
     this.connectToken++;
+    this.ownChatCache.clear(); // another account may be linked next
     clearTimeout(this.reconnectTimer);
     const client = this.client;
     this.client = null;
@@ -247,11 +252,89 @@ export class WhatsAppManager extends EventEmitter {
     return this.client.sendMessage(chatId, text, quotedMessageId ? { quotedMessageId } : {});
   }
 
-  /** Send a PNG (a Buffer) with an optional caption. */
+  /** The ways to send one image, in the order they are tried (see core/image-send.js for why there is more than one). */
+  #imageStrategies(chatId, media, caption) {
+    const opts = caption ? { caption } : {};
+    return [
+      { name: 'direct', run: () => this.client.sendMessage(chatId, media, opts) },
+      { name: 'document', run: () => this.client.sendMessage(chatId, media, { ...opts, sendMediaAsDocument: true }) },
+      {
+        name: 'chat',
+        run: async () => {
+          const chat = await this.client.getChatById(chatId);
+          return chat.sendMessage(media, opts);
+        },
+      },
+      {
+        name: 'phone-jid',
+        run: async () => {
+          if (!String(chatId).endsWith('@lid')) throw new Error('not a LID chat');
+          const number = await this.#contactNumber(chatId);
+          if (!number) throw new Error('no phone number known for this contact');
+          return this.client.sendMessage(`${number}@c.us`, media, opts);
+        },
+      },
+    ];
+  }
+
+  /**
+   * Send a PNG (a Buffer) with an optional caption. Tries the ways in #imageStrategies, the one that worked last
+   * first; throws only when all of them fail.
+   */
   async sendImage(chatId, png, { caption, filename = 'invitation.png' } = {}) {
     this.#requireReady();
     const media = new MessageMedia('image/png', Buffer.from(png).toString('base64'), filename);
-    return this.client.sendMessage(chatId, media, caption ? { caption } : {});
+    const { sent, strategy, results } = await trySendStrategies(this.#imageStrategies(chatId, media, caption), { preferred: this.lastImageStrategy });
+    for (const r of results.filter((x) => !x.ok)) {
+      const key = `${r.strategy}:${r.error}`;
+      if (this.imageWarned.has(key)) continue; // once per way and error, not on every card
+      this.imageWarned.add(key);
+      this.log.warn('Image send way failed', { strategy: r.strategy, error: r.error });
+    }
+    if (!sent) throw new Error(`Every image send way failed (${results.map((r) => `${r.strategy}: ${r.error}`).join(' | ')})`);
+    if (strategy !== this.lastImageStrategy) this.log.info('Image sent', { strategy, previously: this.lastImageStrategy });
+    this.lastImageStrategy = strategy;
+    return sent;
+  }
+
+  /**
+   * Diagnostics: send `png` to `chatId` with each way in turn (or until one works) and report what happened,
+   * without throwing. Returns [{ strategy, ok, error?, id? }].
+   */
+  async testImageStrategies(chatId, png, caption, { all = false } = {}) {
+    this.#requireReady();
+    const media = new MessageMedia('image/png', Buffer.from(png).toString('base64'), 'card-test.png');
+    const { results } = await trySendStrategies(this.#imageStrategies(chatId, media, caption), { all });
+    return results.map((r) => ({ strategy: r.strategy, ok: r.ok, ...(r.ok ? { id: r.message?.id?._serialized ?? null } : { error: r.error }) }));
+  }
+
+  async #contact(chatId) {
+    try {
+      return await this.client.getContactById(chatId);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Is this chat id the owner's own account (the "Message yourself" chat)? Cached per id. */
+  async isOwnChat(chatId) {
+    if (!this.ready || !chatId) return false;
+    if (this.ownChatCache.has(chatId)) return this.ownChatCache.get(chatId);
+    const c = await this.#contact(chatId);
+    const v = !!c?.isMe;
+    if (c) {
+      this.ownChatCache.set(chatId, v);
+      if (this.ownChatCache.size > 500) this.ownChatCache.delete(this.ownChatCache.keys().next().value);
+    }
+    return v;
+  }
+
+  /** The real phone number behind a LID chat, when WhatsApp tells us. */
+  async #contactNumber(chatId) {
+    const c = await this.#contact(chatId);
+    const n = String(c?.number || '').replace(/\D/g, '');
+    const lid = String(chatId).split('@')[0].split(':')[0];
+    return /^\d{6,15}$/.test(n) && n !== lid ? n : null;
   }
 
   /**

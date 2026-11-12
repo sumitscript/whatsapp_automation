@@ -15,6 +15,8 @@ export const keys = Object.freeze({
   workerStatus: `${P}worker:status`,
   agendaMsg: (waMessageId) => `${P}agenda:msg:${waMessageId}`, // owner notice message → agenda item number (for quote-replies)
   ownerCmd: (waMessageId) => `${P}ownercmd:${waMessageId}`, // an owner command already handled (dedupe)
+  agendaTold: (itemId) => `${P}agenda:told:${itemId}`, // what time/place the contact was last told for an agenda item (to say "updated" next time)
+  selfChats: `${P}selfchats`, // SET of the owner's own chat ids (the LID of "Message yourself"), learned from our notices
 });
 
 /** Globs for everything stored per chat (wiped when the WhatsApp account is logged out with "delete data"). */

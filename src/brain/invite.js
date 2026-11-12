@@ -32,6 +32,7 @@ const TEXT = {
     passOn: "Noted {name}! I can't act on this myself, so I'll pass it on to the real {owner}. {owner} will see it soon ✅",
     ask: "Noted {name}! Which day, time and place did you have in mind? I'll pass it to the real {owner} to confirm.",
     confirmHead: '✅ Confirmed, {name}! {owner} has accepted: {title}',
+    updatedHead: '🔁 Updated, {name}! {owner} has confirmed the new time: {title}',
     confirmTail: 'See you then 🙂',
     decline: "Hey {name}, {owner} can't make this one ({title}, {when}). Feel free to suggest another time 🙏",
   },
@@ -40,6 +41,7 @@ const TEXT = {
     passOn: 'Note kar liya {name}! Yeh baat asli {owner} tak pahuncha di jayegi. {owner} jald dekh lenge ✅',
     ask: 'Note kar liya {name}! Kis din, kitne baje aur kahan milna hai? Asli {owner} tak pahuncha diya jayega, {owner} confirm karenge.',
     confirmHead: '✅ Confirm ho gaya, {name}! {owner} ne haan kar di hai: {title}',
+    updatedHead: '🔁 Update, {name}! {owner} ne naya time confirm kiya hai: {title}',
     confirmTail: 'Milte hain 🙂',
     decline: 'Hey {name}, {owner} is baar nahi aa paayenge ({title}, {when}). Koi aur time batao 🙏',
   },
@@ -48,6 +50,7 @@ const TEXT = {
     passOn: 'नोट कर लिया {name}! यह बात असली {owner} तक पहुँचा दी जाएगी। {owner} जल्द देख लेंगे ✅',
     ask: 'नोट कर लिया {name}! किस दिन, कितने बजे और कहाँ मिलना है? असली {owner} तक पहुँचा दिया जाएगा, {owner} पुष्टि करेंगे।',
     confirmHead: '✅ पक्का, {name}! {owner} ने मंज़ूरी दे दी है: {title}',
+    updatedHead: '🔁 बदलाव, {name}! {owner} ने नया समय पक्का किया है: {title}',
     confirmTail: 'तब मिलते हैं 🙂',
     decline: '{name}, {owner} इस बार नहीं आ पाएँगे ({title}, {when})। कोई और समय बताइए 🙏',
   },
@@ -56,6 +59,7 @@ const TEXT = {
     passOn: 'नोंदवून घेतले {name}! हे खऱ्या {owner} पर्यंत पोहोचवले जाईल. {owner} लवकरच पाहतील ✅',
     ask: 'नोंदवून घेतले {name}! कोणत्या दिवशी, किती वाजता आणि कुठे भेटायचे? खऱ्या {owner} पर्यंत पोहोचवले जाईल, {owner} कळवतील.',
     confirmHead: '✅ निश्चित, {name}! {owner} यांनी मान्य केले आहे: {title}',
+    updatedHead: '🔁 बदल, {name}! {owner} यांनी नवीन वेळ निश्चित केली आहे: {title}',
     confirmTail: 'तेव्हा भेटू 🙂',
     decline: '{name}, {owner} यावेळी येऊ शकणार नाहीत ({title}, {when}). दुसरी वेळ सुचवा 🙏',
   },
@@ -64,6 +68,7 @@ const TEXT = {
     passOn: 'નોંધી લીધું {name}! આ વાત સાચા {owner} સુધી પહોંચાડવામાં આવશે. {owner} જલ્દી જોશે ✅',
     ask: 'નોંધી લીધું {name}! કયા દિવસે, કેટલા વાગ્યે અને ક્યાં મળવું છે? સાચા {owner} સુધી પહોંચાડીશું, {owner} જણાવશે.',
     confirmHead: '✅ પાક્કું, {name}! {owner} એ મંજૂરી આપી છે: {title}',
+    updatedHead: '🔁 ફેરફાર, {name}! {owner} એ નવો સમય પાક્કો કર્યો છે: {title}',
     confirmTail: 'ત્યારે મળીએ 🙂',
     decline: '{name}, {owner} આ વખતે આવી શકશે નહીં ({title}, {when}). બીજો સમય જણાવો 🙏',
   },
@@ -116,7 +121,8 @@ export function passOnAck(p) {
 /** Message that goes with the invitation card (or alone) when the owner accepts. */
 export function confirmationText(p) {
   const { fam, v } = vars(p);
-  const lines = [fill(TEXT[fam].confirmHead, v)];
+  // `rescheduled`: the owner already confirmed this and the time/place changed since: say "updated", not "confirmed" again.
+  const lines = [fill(TEXT[fam][p.rescheduled ? 'updatedHead' : 'confirmHead'], v)];
   if (v.when) lines.push(`🗓 ${v.when}`);
   if (p.place) lines.push(`📍 ${p.place}`);
   lines.push(TEXT[fam].confirmTail);

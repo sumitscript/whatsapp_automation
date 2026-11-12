@@ -84,6 +84,8 @@ const NATIVE_WORDS = {
   बजे: 'baje', वाजता: 'baje', वाजले: 'baje',
   मिलना: 'milna', मिलते: 'milte', मिलेंगे: 'milenge', मिलें: 'milein', मिलूंगा: 'milunga', मिलूँगा: 'milunga', मिलूंगी: 'milunga', मुलाकात: 'mulakat', भेटू: 'milna', भेटूया: 'milna', भेटायचं: 'milna', भेटायचे: 'milna',
   मीटिंग: 'meeting', मिटिंग: 'meeting', कॉल: 'call', फोन: 'phone', बैठक: 'meeting',
+  // "मुझे मिलना है" (I want to meet)
+  है: 'hai', मुझे: 'mujhe', करना: 'karna', करनी: 'karni', चाहता: 'chahta', चाहती: 'chahti', आपसे: 'aapse', तुमसे: 'tumse',
   सोमवार: 'monday', मंगलवार: 'tuesday', बुधवार: 'wednesday', गुरुवार: 'thursday', बृहस्पतिवार: 'thursday', शुक्रवार: 'friday', शनिवार: 'saturday', रविवार: 'sunday',
   // "tell him" in Hindi/Marathi/Gujarati (for isPassOnRequest)
   उन्हें: 'unhe', उनको: 'unko', उसे: 'usse', उसको: 'usko', बोल: 'bol', बोलो: 'bolo', बोलना: 'bolna', बता: 'bata', बताओ: 'batao', बताना: 'batana', कह: 'keh', कहो: 'kaho', कहना: 'kehna', देना: 'dena', दीजिए: 'dijiye',
@@ -109,6 +111,44 @@ const LATIN_WORDS = [
   [/\b(?:aavtikal|aavatikal|avtikal|udya|uddya|2morrow|2moro|2mrw|tomrw)\b/g, 'tomorrow'], [/\b(?:savere|savare)\b/g, 'subah'], [/\bparson\b/g, 'parso'],
 ];
 
+// Days of the month typed or spoken as words: "twelfth november", "twenty first of november", "first dec",
+// "november twelve", "on the thirty first". Folded into digits ("12th november") before the date reader runs.
+const DAY_UNITS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19 };
+const DAY_ORDINALS = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10, eleventh: 11, twelfth: 12, thirteenth: 13, fourteenth: 14, fifteenth: 15, sixteenth: 16, seventeenth: 17, eighteenth: 18, nineteenth: 19 };
+const DAY_TENS = { twenty: 20, thirty: 30 };
+const ORDINAL_PHRASE = `(?:(?:twenty|thirty)[\\s-]+)?(?:${Object.keys(DAY_ORDINALS).join('|')})|twentieth|thirtieth`;
+const CARDINAL_PHRASE = `(?:(?:twenty|thirty)(?:[\\s-]+(?:one|two|three|four|five|six|seven|eight|nine))?|${Object.keys(DAY_UNITS).join('|')})`;
+const dayOrdinalSuffix = (n) => (n % 100 >= 11 && n % 100 <= 13 ? 'th' : { 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th');
+const TIME_CUE_AHEAD = String.raw`(?!\s*(?:[ap]\s?\.?\s?m\b|o['’]?clock|baje|bje|(?:in the |at )?(?:morning|afternoon|evening|night|subah|shaam|raat|dopahar)\b))`;
+
+function ordinalValue(phrase) {
+  const w = phrase.trim().split(/[\s-]+/);
+  let n = null;
+  if (w.length === 2 && DAY_TENS[w[0]] && DAY_ORDINALS[w[1]] <= 9) n = DAY_TENS[w[0]] + DAY_ORDINALS[w[1]];
+  else if (w[0] === 'twentieth') n = 20;
+  else if (w[0] === 'thirtieth') n = 30;
+  else if (w.length === 1) n = DAY_ORDINALS[w[0]] ?? null;
+  return n && n >= 1 && n <= 31 ? n : null;
+}
+function cardinalValue(phrase) {
+  const w = phrase.trim().split(/[\s-]+/);
+  let n = null;
+  if (DAY_TENS[w[0]]) n = DAY_TENS[w[0]] + (w[1] ? DAY_UNITS[w[1]] : 0);
+  else if (w.length === 1) n = DAY_UNITS[w[0]] ?? null;
+  return n && n >= 1 && n <= 31 ? n : null;
+}
+function foldDayWords(s) {
+  const ord = (n) => `${n}${dayOrdinalSuffix(n)}`;
+  return s
+    .replace(new RegExp(`\\b(${ORDINAL_PHRASE})\\s+(?:of\\s+)?(?=(?:${MONTH_RE})\\b)`, 'g'), (m, p) => (ordinalValue(p) ? `${ord(ordinalValue(p))} ` : m))
+    .replace(new RegExp(`\\b(${MONTH_RE})\\s+(?:the\\s+)?(${ORDINAL_PHRASE})\\b`, 'g'), (m, mon, p) => (ordinalValue(p) ? `${mon} ${ord(ordinalValue(p))}` : m))
+    // "on/by/till the twelfth" with no month ("the second" alone is left alone: it is usually the unit of time)
+    .replace(new RegExp(`\\b(on|by|till|until)\\s+(?:the\\s+)?(${ORDINAL_PHRASE})\\b`, 'g'), (m, w, p) => (p.trim() !== 'second' && ordinalValue(p) ? `${w} the ${ord(ordinalValue(p))}` : m))
+    .replace(new RegExp(`\\b(${CARDINAL_PHRASE})\\s+(?:of\\s+)?(?=(?:${MONTH_RE})\\b)`, 'g'), (m, p) => (cardinalValue(p) ? `${cardinalValue(p)} ` : m))
+    // "november nine p m" is a time, not the 9th: only fold when no clock word follows
+    .replace(new RegExp(`\\b(${MONTH_RE})\\s+(${CARDINAL_PHRASE})\\b${TIME_CUE_AHEAD}`, 'g'), (m, mon, p) => (cardinalValue(p) ? `${mon} ${cardinalValue(p)}` : m));
+}
+
 /**
  * People type times loosely: "six p m", "6 p.m", "five o'clock", "at seven baje", "sadhe paanch baje",
  * "५ बजे", "5 to 6pm", "1730 hrs". Lower-cases and rewrites those into the digit forms the date reader
@@ -124,6 +164,7 @@ export function normalizeTimeText(text) {
   for (const [re, to] of NATIVE_RULES) s = s.replace(re, to);
   for (const [re, to] of LATIN_WORDS) s = s.replace(re, to);
   s = s.replace(/\s{2,}/g, ' ');
+  s = foldDayWords(s);
   const cue = String.raw`(?=\s*(?:o['’]?clock|[ap]\s?\.?\s?m\b|baje|bje|(?:in the |at )?(?:morning|afternoon|evening|night|subah|shaam|raat|dopahar)\b))`;
   s = s
     .replace(new RegExp(String.raw`\b(${NUMBER_WORD_RE})\b${cue}`, 'g'), (w) => String(NUMBER_WORDS[w]))
@@ -133,7 +174,9 @@ export function normalizeTimeText(text) {
     .replace(/\bpaune\s+(\d{1,2})\b/g, (_, n) => `${(+n + 11) % 12 || 12}:45`)
     .replace(/\bdedh(?=\s*baje)/g, '1:30')
     .replace(/\bdhai(?=\s*baje)/g, '2:30')
-    .replace(/(\d)\s*([ap])\s?\.?\s?m\b\.?/g, '$1$2m')
+    // "9 p m", "9 p.m." -> 9pm. A full stop right after it ("9 p m.At the cafe") is a sentence break: keep a space so
+    // the next word is not glued on ("9pmat").
+    .replace(/(\d)\s*([ap])\s?\.?\s?m\b(\.?)/g, (_, d, ap, dot) => `${d}${ap}m${dot ? ' ' : ''}`)
     // military time: "1730 hrs" -> 17:30
     .replace(/\b([01]\d|2[0-3])([0-5]\d)\s*(?:hrs|hours|hr)\b/g, '$1:$2')
     // "5 to 6pm" / "5-6 pm" → the start time; the suffix comes from the end unless the start would pass it ("11-1pm")
@@ -149,16 +192,21 @@ export function normalizeTimeText(text) {
 
 // "at the railway station", "near zudio office, vadodara": a place named in the message, for when the model leaves
 // `location` empty. Only the first place phrase; a time ("at 6") never counts.
-const PLACE = /\b(?:at|near|outside|opposite|in front of|behind|inside)\s+(?:the\s+)?([a-z][^,.;\n!?]{2,50}?)(?=\s+(?:at|by|around|tomorrow|today|tonight|on)\b|[,.;\n!?]|$)/i;
+// The place ends where the purpose starts: "at beyond 7 caffe for bank financial statements" → "beyond 7 caffe".
+const PLACE_END = String.raw`(?=\s+(?:at|by|around|tomorrow|today|tonight|on|for|about|regarding|because|to discuss|so that|jahan|ke liye|ke baare|ke bare|taaki)\b|[,.;\n!?]|$)`;
+const PLACE = new RegExp(String.raw`\b(?:at|near|outside|opposite|in front of|behind|inside)\s+(?:the\s+)?([a-z][^,.;\n!?]{2,50}?)${PLACE_END}`, 'i');
+// Typed too fast: "on 12 november 9 p m add sayaji bagh" means "at". Only when "add" directly follows a date or time.
+const WHEN_BEFORE_ADD = String.raw`(?:\d{1,2}\s*(?::\d{2})?\s*[ap]m|\d{1,2}:\d{2}|\d{1,2}\s*baje|today|tonight|tomorrow|kal|aaj|parso|sunday|monday|tuesday|wednesday|thursday|friday|saturday|(?:${MONTH_RE})(?:\s+\d{1,2}(?:st|nd|rd|th)?)?|\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:${MONTH_RE}))`;
+const PLACE_ADD = new RegExp(String.raw`\b${WHEN_BEFORE_ADD}\s+add\s+(?:the\s+)?([a-z][^,.;\n!?]{2,50}?)${PLACE_END}`, 'i');
 // Hinglish puts the place first: "railway station pe milte hain", "office ke bahar", "ghar par". Up to 3 words
 // before the postposition, minus time words and pronouns.
 const POSTPOSITION = /\b((?:[a-z][a-z'-]*\s+){0,3}[a-z][a-z'-]*)\s+(?:pe|par|mein|me|ke paas|ke bahar|ke samne|ke pass|ke andar)\b/;
 const NOT_PLACE = new Set(['kal', 'aaj', 'parso', 'subah', 'shaam', 'raat', 'dopahar', 'baje', 'am', 'pm', 'tomorrow', 'today', 'tonight', 'at', 'on', 'ko', 'se', 'tak', 'tum', 'aap', 'main', 'mai', 'hum', 'kya', 'abhi', 'ye', 'yeh', 'wo', 'vo', 'is', 'us', 'mera', 'meri', 'mere', 'tumhare', 'aapke', 'ki', 'ka', 'ke', 'hai', 'hain', 'ho', 'to', 'toh', 'bhi', 'next', 'week', 'weekend', 'milte', 'milna', 'milenge', 'baat', 'call', 'meeting', 'meet', 'and', 'the', 'ek', 'do', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']);
 export function guessLocation(text) {
   const norm = normalizeTimeText(text);
-  const m = PLACE.exec(norm);
+  const m = PLACE_ADD.exec(norm) || PLACE.exec(norm);
   if (m) {
-    const v = m[1].trim().replace(/\s+/g, ' ');
+    const v = m[1].trim().replace(/\s+/g, ' ').replace(/\s+(?:par|pe|pr|mein|me)$/, ''); // "sayaji pawar par" → "sayaji pawar"
     return v.length < 3 ? null : v.charAt(0).toUpperCase() + v.slice(1);
   }
   const h = POSTPOSITION.exec(norm.replace(/[,.;!?]/g, ' '));
@@ -224,8 +272,11 @@ export function parseWhen(text, { now = new Date(), timeZone = 'Asia/Kolkata' } 
   // "on the 12th", "by 20th": a day of the month with no month name
   if (!day && (m = /\b(?:on|by|till|until|the)\s+(\d{1,2})(?:st|nd|rd|th)\b/.exec(t)) && +m[1] >= 1 && +m[1] <= 31) {
     const dom = +m[1];
-    const next = dom >= today.d ? { y: today.y, m: today.m } : today.m === 12 ? { y: today.y + 1, m: 1 } : { y: today.y, m: today.m + 1 };
-    day = { y: next.y, m: next.m, d: dom };
+    // This month if the day is still ahead, else next month; skip months that do not have that day ("the 31st" in November).
+    let ym = { y: today.y, m: today.m };
+    if (dom < today.d) ym = today.m === 12 ? { y: today.y + 1, m: 1 } : { y: today.y, m: today.m + 1 };
+    for (let tries = 0; tries < 3 && dom > new Date(Date.UTC(ym.y, ym.m, 0)).getUTCDate(); tries++) ym = ym.m === 12 ? { y: ym.y + 1, m: 1 } : { y: ym.y, m: ym.m + 1 };
+    day = { y: ym.y, m: ym.m, d: dom };
     take(m);
   }
   // "this weekend" → Saturday; "next week" / "agle hafte" → Monday of next week (both all-day unless a time follows)
@@ -425,6 +476,23 @@ export function isPassOnRequest(text, { ownerNames = [] } = {}) {
 /** The text talks about meeting/calling/eating together (no time needed). */
 export function mentionsMeeting(text) {
   return !TEXT_TASK.test(String(text ?? '')) && MEET.test(normalizeTimeText(text));
+}
+
+// "I want to meet you", "mujhe aapse milna hai", "milna hai", "meet karna hai", "मुझे मिलना है": the sender wants a
+// meeting but names no time. The twin answers with the "which day, time and place?" template instead of the model
+// (a 3B model replied "Mujhe bhi tumse milna hai. Kaisi jagah ho rahi thi?"). "Nice to meet you" does not count.
+const WANTS_TO_MEET = [
+  /\b(?:i|we|id|i'd)\s*(?:would\s+|really\s+|just\s+|urgently\s+|do\s+)*(?:want|wanna|need|have|like|wish|hope)\s+(?:to\s+)?(?:meet|catch\s*up|see\s+(?:you|him|her|them)|talk\s+(?:to|with)\s+(?:you|him|her|them)|speak\s+(?:to|with)\s+(?:you|him|her|them))\b/,
+  /\b(?:wanna|want\s+to|need\s+to)\s+meet\b/,
+  /\bmil(?:na|ne|unga|ungi)\s+(?:hai|tha|thi|chahta|chahti|chahte|ka\s+man|ka\s+mann|ki\s+iccha)\b/,
+  /\b(?:mujhe|mereko|mujhko|hume|humein)\b[^.?!]{0,30}\bmil(?:na|ne|unga|ungi)\b/,
+  /\b(?:meet|mulakat|baat|call)\s+(?:karna|karni|karne)\s+(?:hai|tha|thi|chahta|chahti)\b/,
+];
+export function wantsToMeet(text) {
+  if (TEXT_TASK.test(String(text ?? ''))) return false;
+  const s = normalizeTimeText(text);
+  if (/\bnice\s+to\s+meet\b|\bglad\s+to\s+meet\b|\bpleased\s+to\s+meet\b/.test(s)) return false;
+  return WANTS_TO_MEET.some((re) => re.test(s));
 }
 
 /** What sort of get-together: a call, a meal or a plain meeting. Used for titles and the invitation card. */

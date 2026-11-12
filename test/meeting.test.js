@@ -283,3 +283,89 @@ test('pipeline: "remind him" gets the pass-on template; coding and ordinary chat
   assert.equal((await replyTo('write a python function to reverse a string')).calls.length, 1);
   assert.equal((await replyTo('remind him', { settingsOver: { meetingAck: false } })).calls.length, 1, 'switched off with meetingAck');
 });
+
+// ------------------------------------------------- the 12 Nov chat: swallowed period, word dates, places, "milna hai"
+
+import { wantsToMeet } from '../src/brain/agenda.js';
+
+const NOW2 = new Date('2026-11-12T05:11:00Z'); // Thu 12 Nov, 10:41 in Asia/Kolkata
+const at2 = (text) => {
+  const r = parseWhen(text, { now: NOW2, timeZone: TZ });
+  return r && formatWhen(r.dueAt, TZ, r.allDay);
+};
+
+test('a full stop right after "p m" does not glue the next word on ("9pmat")', () => {
+  assert.equal(normalizeTimeText('nine p m.At sayaji'), '9pm at sayaji');
+  assert.equal(normalizeTimeText('at 9 p.m. at the mall').replace(/\s+/g, ' '), 'at 9pm at the mall');
+  assert.equal(normalizeTimeText('6 pm tomorrow'), '6pm tomorrow', 'no dot, nothing changes');
+  assert.equal(at2("Let's meet on twelfth november nine p m.At sayaji pawar par"), 'Thu, 12 Nov, 9:00 pm', 'the message that used to ask for the details again');
+});
+
+test('days of the month in words: ordinals and cardinals, with or without "of"', () => {
+  assert.equal(at2('meet on twenty first of november at 5 pm'), 'Sat, 21 Nov, 5:00 pm');
+  assert.equal(at2('first dec 6 pm lunch'), 'Tue, 1 Dec, 6:00 pm');
+  assert.equal(at2('november twelve 4pm'), 'Thu, 12 Nov, 4:00 pm');
+  assert.equal(at2('twelve november 4pm'), 'Thu, 12 Nov, 4:00 pm');
+  assert.equal(at2('thirtieth november 4pm'), 'Mon, 30 Nov, 4:00 pm');
+  assert.equal(at2('on the thirty first at 3 pm'), 'Thu, 31 Dec, 3:00 pm', 'November has no 31st: the next month that has one');
+  assert.equal(at2('12th november 9pm'), 'Thu, 12 Nov, 9:00 pm');
+  // a clock time next to a month name is not a date, and "the second" alone is the unit of time
+  assert.equal(at2('november nine p m'), 'Thu, 12 Nov, 9:00 pm', 'a clock time after a month name is 9 pm today, not the 9th of November');
+  assert.equal(normalizeTimeText('wait a second then at 5'), 'wait a second then at 5');
+  assert.match(normalizeTimeText('twelve november nine p m'), /^12 november 9pm$/);
+});
+
+test('the place stops where the purpose starts, and "add" typed for "at" after a time is read as "at"', () => {
+  assert.equal(guessLocation("Let's meet on 20th November morning 10 am at beyond 7 caffe for bank financial statements"), 'Beyond 7 caffe');
+  assert.equal(guessLocation('meet at the railway station about the contract'), 'Railway station');
+  assert.equal(guessLocation('lunch at pizza hut regarding the project tomorrow'), 'Pizza hut');
+  assert.equal(guessLocation('On 12 november 9 p m add sayaji bagh'), 'Sayaji bagh');
+  assert.equal(guessLocation('tomorrow add the office'), 'Office');
+  assert.equal(guessLocation('please add sayaji bagh to the list'), null, '"add" with no date/time before it is just the word add');
+  assert.equal(guessLocation("Let's meet on twelfth november nine p m.At sayaji pawar par"), 'Sayaji pawar', 'a trailing Hinglish "par" is dropped');
+});
+
+test('wanting to meet with no time yet ("I want to meet you", "milna hai") is detected; small talk is not', () => {
+  for (const t of ['I want to meet you', 'I really need to meet urgently', 'i wanna meet him', 'We would like to meet', 'Mujhe aapse milna hai', 'mujhe unse milna hai', 'milna hai', 'meet karna hai', 'mulakat karni hai', 'मुझे मिलना है', 'mujhe milna tha']) {
+    assert.equal(wantsToMeet(t), true, t);
+  }
+  for (const t of ['nice to meet you', 'Glad to meet you!', 'I need to see the report', 'summarize this: I want to meet you', 'how are you', 'what is the capital of France']) {
+    assert.equal(wantsToMeet(t), false, t);
+  }
+});
+
+test('pipeline: "Mujhe aapse milna hai" gets the "which day, time and place?" reply, not a model answer', async () => {
+  const hi = await replyTo('Mujhe aapse milna hai');
+  assert.equal(hi.calls.length, 0);
+  assert.equal(hi.done.meta.intent, 'meeting');
+  assert.match(hi.chunks[0], /Kis din, kitne baje aur kahan milna hai/);
+  const en = await replyTo('I want to meet you');
+  assert.equal(en.calls.length, 0);
+  assert.match(en.chunks[0], /Which day, time and place/);
+  assert.equal((await replyTo('nice to meet you')).calls.length, 1, 'small talk still goes to the model');
+  assert.equal((await replyTo('Mujhe aapse milna hai', { settingsOver: { meetingAck: false } })).calls.length, 1);
+});
+
+test('pipeline: the twelfth-november message with the swallowed period now gets the full reply with date, time and place', async () => {
+  const r = await replyTo("Let's meet on twelfth november nine p m.At sayaji pawar par");
+  assert.equal(r.calls.length, 0);
+  assert.match(r.chunks[0], /9:00 pm/);
+  assert.match(r.chunks[0], /Sayaji pawar/);
+  assert.doesNotMatch(r.chunks[0], /par$/m);
+});
+
+test('the heuristic item and the extraction fallback use the place named in the current message', () => {
+  const it = heuristicItem({ text: 'On 12 november 9 p m add sayaji bagh', contextText: "Let's meet at sayaji pawar", contactName: 'Aditya Soni', now: NOW2, timeZone: TZ });
+  assert.equal(it.location, 'Sayaji bagh');
+  assert.equal(formatWhen(it.dueAt, TZ, it.allDay), 'Thu, 12 Nov, 9:00 pm');
+});
+
+test('rescheduled confirmations say "updated" in every language and keep the new time and place', () => {
+  const p = { name: 'Aditya Soni', owner: 'Sumit Soni', title: 'Meet Aditya', dueAt: new Date('2026-11-26T04:30:00Z'), place: 'Beyond 7 caffe', timeZone: TZ };
+  assert.equal(confirmationText({ ...p, code: 'en', rescheduled: true }), '🔁 Updated, Aditya! Sumit has confirmed the new time: Meet Aditya\n🗓 Thu, 26 Nov, 10:00 am\n📍 Beyond 7 caffe\nSee you then 🙂');
+  assert.match(confirmationText({ ...p, code: 'hi-Latn', rescheduled: true }), /^🔁 Update, Aditya! Sumit ne naya time confirm kiya hai/);
+  assert.match(confirmationText({ ...p, code: 'hi', rescheduled: true }), /^🔁 बदलाव, Aditya!/);
+  assert.match(confirmationText({ ...p, code: 'mr', rescheduled: true }), /^🔁 बदल, Aditya!/);
+  assert.match(confirmationText({ ...p, code: 'gu', rescheduled: true }), /^🔁 ફેરફાર, Aditya!/);
+  assert.match(confirmationText({ ...p, code: 'en' }), /^✅ Confirmed, Aditya!/, 'without the flag it is the normal confirmation');
+});

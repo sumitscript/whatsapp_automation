@@ -7,6 +7,7 @@ import { channels, keys, recentLogs, withinRate } from '../core/redis.js';
 import { catalogWithInstalled } from '../llm/catalog.js';
 import { deriveLlmState } from '../llm/status.js';
 import { replyLanguage } from '../brain/lang.js';
+import { renderTemplate } from '../core/settings-schema.js';
 import { encryptSecret, maskKey } from '../core/secrets.js';
 import { GroqClient } from '../llm/groq.js';
 import { isGroqKeyFormat } from '../llm/key-store.js';
@@ -100,6 +101,14 @@ export function createApp(deps) {
 
   // ---------- WhatsApp connection ----------
   api.get('/wa/status', (_req, res) => res.json(wa.status()));
+  // Diagnostics for "the invitation card never arrives": sends a small picture to the OWNER's own number with each image-send
+  // way in turn and reports which worked. Body (optional): { all: true } tries every way instead of stopping at the first success.
+  // → { ok, chat, rendered, worked: string|null, results: [{ strategy, ok, error?, id? }] }
+  api.post('/wa/test-image', async (req, res) => {
+    audit(req, 'wa.test-image');
+    const out = await inbox.testImage({ all: req.body?.all === true });
+    res.json({ ok: out.results.some((r) => r.ok), chat: out.chat, rendered: out.rendered, worked: out.results.find((r) => r.ok)?.strategy ?? null, results: out.results });
+  });
   for (const action of ['connect', 'disconnect', 'logout', 'restart']) {
     api.post(`/wa/${action}`, async (req, res) => {
       audit(req, `wa.${action}`);
@@ -243,7 +252,6 @@ export function createApp(deps) {
     res.json({
       provider: s.llmProvider,
       model: s.groqModel,
-      fallback: s.groqFallback,
       envKeys: groqDeps.pool.status().filter((k) => k.source === 'env').length,
       keys: groqDeps.pool.status().map((k) => ({ ...k, ...(live.get(k.id) ? { ...live.get(k.id), label: k.label, hint: k.hint, source: k.source } : {}) })),
       counters: worker?.counters ?? null,
@@ -391,8 +399,12 @@ export function createApp(deps) {
     // skip it for one item). Declines and other statuses only message the contact when notify:true is sent.
     const statusChanged = value.status && value.status !== before.status;
     const autoConfirm = statusChanged && value.status === 'confirmed' && settings.get().agendaConfirm && req.body?.notify !== false;
-    if (statusChanged && (req.body?.notify === true || autoConfirm)) {
-      const r = await inbox.notifyAgendaDecision(item, value.status).catch((err) => {
+    // Already confirmed and the time or place changed: tell the contact ("Updated…" with a fresh card) unless notify:false.
+    const movedWhileConfirmed =
+      !statusChanged && before.status === 'confirmed' && item.status === 'confirmed' && !!item.chatId && settings.get().agendaConfirm && req.body?.notify !== false &&
+      (new Date(before.dueAt ?? 0).getTime() !== new Date(item.dueAt ?? 0).getTime() || (before.location || '') !== (item.location || ''));
+    if ((statusChanged && (req.body?.notify === true || autoConfirm)) || movedWhileConfirmed) {
+      const r = await inbox.notifyAgendaDecision(item, movedWhileConfirmed ? 'confirmed' : value.status, { rescheduled: movedWhileConfirmed }).catch((err) => {
         log.warn('Could not tell the contact about the agenda decision', { id, err });
         return { sent: false, card: false };
       });
@@ -508,9 +520,16 @@ export function createApp(deps) {
     const longTermMemory = typeof req.body?.longTermMemory === 'string' ? req.body.longTermMemory.slice(0, 1500) || undefined : undefined;
     const bubbles = [];
     let meta = {};
-    for await (const ev of brain.respond({ text: message, settings: s, history, contactName, longTermMemory })) {
-      if (ev.type === 'chunk') bubbles.push(ev.text);
-      else if (ev.type === 'done') meta = ev.meta;
+    try {
+      for await (const ev of brain.respond({ text: message, settings: s, history, contactName, longTermMemory })) {
+        if (ev.type === 'chunk') bubbles.push(ev.text);
+        else if (ev.type === 'done') meta = ev.meta;
+      }
+    } catch (err) {
+      // "Groq only" mode and Groq cannot answer: show the reply a contact would get instead of an error.
+      if (err?.name !== 'GroqUnavailableError') throw err;
+      const text = renderTemplate(s.groqBusyMessage, s, { name: contactName });
+      return res.json({ reply: text, bubbles: [text], busy: true, provider: 'groq', model: 'busy-notice', reason: err.kind || 'unavailable', retryAfterMs: err.retryAfterMs ?? null });
     }
     res.json({ reply: bubbles.join('\n\n'), bubbles, ...meta });
   });

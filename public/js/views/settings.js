@@ -100,11 +100,14 @@ export async function mount(root, { hub }) {
           <p class="muted small" id="gq-summary">Loading…</p>
           <form id="gq-form" class="stack">
             <div class="radio-cards">
-              <label class="radio-card"><input type="radio" name="llmProvider" value="ollama" /><span><strong>Local model</strong><small>Runs on this server's CPU. Private, but slower</small></span></label>
-              <label class="radio-card"><input type="radio" name="llmProvider" value="groq" /><span><strong>Groq</strong><small>Hosted and very fast. Your API keys are used in turn</small></span></label>
+              <label class="radio-card"><input type="radio" name="llmProvider" value="auto" /><span><strong>Auto <span class="muted small">(recommended)</span></strong><small>Groq while a key can answer; the local model takes over when every key is used up, Groq is down, or no key is added</small></span></label>
+              <label class="radio-card"><input type="radio" name="llmProvider" value="ollama" /><span><strong>Local only</strong><small>Always the model on this server's CPU. Private, but slower. Groq is never used</small></span></label>
+              <label class="radio-card"><input type="radio" name="llmProvider" value="groq" /><span><strong>Groq only</strong><small>Never the local model. When no Groq key can answer, people get the short-break message below</small></span></label>
             </div>
             <label class="field"><span>Groq model</span><input name="groqModel" list="gq-models" placeholder="llama-3.3-70b-versatile" autocomplete="off" /><datalist id="gq-models"></datalist></label>
-            <label class="switch-row"><input type="checkbox" class="switch" name="groqFallback" /><span>Fall back to the local model<small class="muted"> — when every Groq key is rate-limited or Groq is down</small></span></label>
+            <label class="field"><span>Short-break message <span class="muted small">(sent in Groq-only mode when Groq cannot answer)</span></span>
+              <textarea name="groqBusyMessage" rows="3" maxlength="1000"></textarea>
+              <small class="muted">Placeholders: <code class="wa-inline">{name}</code> <code class="wa-inline">{persona}</code> <code class="wa-inline">{owner}</code>. Sent at most once every 5 minutes per chat.</small></label>
             <div class="form-actions"><button class="btn btn-primary" type="submit">${raw(icons.save)} Save provider</button></div>
           </form>
           <h3 class="section-title">Groq API keys</h3>
@@ -343,7 +346,7 @@ export async function mount(root, { hub }) {
   });
 
   // ---------- Groq provider + keys ----------
-  const gq = { data: null, timer: null, modelsLoaded: false };
+  const gq = { data: null, timer: null, modelsLoaded: false, busyMessage: null };
   const gqForm = $('#gq-form', root);
   const cooldownText = (ms) => (ms >= 90_000 ? `${Math.ceil(ms / 60_000)} min` : `${Math.ceil(ms / 1000)} s`);
 
@@ -353,15 +356,18 @@ export async function mount(root, { hub }) {
     if (!gqForm.contains(document.activeElement)) {
       Array.from(gqForm.elements.llmProvider).forEach((r) => (r.checked = r.value === d.provider));
       gqForm.elements.groqModel.value = d.model || '';
-      gqForm.elements.groqFallback.checked = !!d.fallback;
+      if (gq.busyMessage != null) gqForm.elements.groqBusyMessage.value = gq.busyMessage;
     }
     const ready = d.keys.filter((k) => k.state === 'ready').length;
     const c = d.counters;
     const served = c ? html` <span class="muted">Served: ${c.groq} Groq · ${c.local} local${c.fallbacks ? ` · ${c.fallbacks} fell back` : ''}.</span>` : '';
+    const keysText = d.keys.length ? `${ready} of ${d.keys.length} key${d.keys.length === 1 ? '' : 's'} ready.` : 'No Groq key added yet.';
     $('#gq-summary', root).innerHTML =
-      d.provider === 'groq'
-        ? html`Answering with <strong>Groq</strong> (${d.model}). ${d.keys.length ? `${ready} of ${d.keys.length} key${d.keys.length === 1 ? '' : 's'} ready.` : 'No key added yet, so the local model is answering.'}${raw(served)}`
-        : html`Answering with the <strong>local model</strong>. Switch to Groq for much faster replies.`;
+      d.provider === 'ollama'
+        ? html`Mode: <strong>Local only</strong>. Groq is not used${raw(d.keys.length ? html` (you have ${d.keys.length} key${d.keys.length === 1 ? '' : 's'} added: switch to <strong>Auto</strong> to use them)` : '')}.${raw(served)}`
+        : d.provider === 'groq'
+          ? html`Mode: <strong>Groq only</strong> (${d.model}). ${keysText} ${ready ? '' : 'No key can answer right now, so people get the short-break message.'}${raw(served)}`
+          : html`Mode: <strong>Auto</strong>. ${d.keys.length ? `Groq (${d.model}) is answering${ready ? '' : ', but every key is resting, so the local model is answering for now'}. ${keysText}` : 'No Groq key yet, so the local model is answering. Add a key below and Groq starts right away.'}${raw(served)}`;
     const rows = d.keys.map((k) => {
       const pill =
         k.state === 'ready'
@@ -381,6 +387,7 @@ export async function mount(root, { hub }) {
   }
   async function loadGroq() {
     try {
+      if (gq.busyMessage == null) gq.busyMessage = (await api.settings()).settings?.groqBusyMessage ?? '';
       gq.data = await api.groqStatus();
       renderGroq();
       if (!gq.modelsLoaded && gq.data.keys.length) {
@@ -398,10 +405,12 @@ export async function mount(root, { hub }) {
   }
   gqForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const body = { llmProvider: gqForm.elements.llmProvider.value, groqModel: gqForm.elements.groqModel.value.trim() || 'llama-3.3-70b-versatile', groqFallback: gqForm.elements.groqFallback.checked };
+    const body = { llmProvider: gqForm.elements.llmProvider.value, groqModel: gqForm.elements.groqModel.value.trim() || 'llama-3.3-70b-versatile', groqBusyMessage: gqForm.elements.groqBusyMessage.value.trim() };
+    if (!body.groqBusyMessage) delete body.groqBusyMessage;
     try {
       await api.saveSettings(body);
-      toast(body.llmProvider === 'groq' && !gq.data?.keys.length ? 'Saved. Add a Groq key: until then the local model answers' : 'AI provider saved', 'success');
+      gq.busyMessage = body.groqBusyMessage ?? gq.busyMessage;
+      toast(body.llmProvider === 'groq' && !gq.data?.keys.length ? 'Saved. Add a Groq key: until then people get the short-break message' : 'AI provider saved', 'success');
       await loadGroq();
     } catch (ex) {
       toast(ex.message || 'Could not save', 'error');
@@ -412,7 +421,7 @@ export async function mount(root, { hub }) {
     const f = e.target;
     try {
       const r = await api.groqAddKey(f.label.value.trim(), f.key.value.trim());
-      toast(`Key added (${r.models} models available)`, 'success');
+      toast(gq.data?.provider === 'ollama' ? `Key added (${r.models} models). The mode is Local only: choose Auto to use Groq` : `Key added (${r.models} models). Groq is active`, 'success');
       f.reset();
       await loadGroq();
     } catch (ex) {

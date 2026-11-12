@@ -164,9 +164,10 @@ async function handleJob(job) {
     return;
   }
   // Ollama down or the model still loading must not park every job (and the "typing…" indicator) forever.
-  // (With Groq selected and a key ready, a reply does not need the local model at all.)
-  const ready = llmGated.groqUsable() || (await Promise.race([modelReady.then(() => true), sleep(MODEL_WAIT_MS).then(() => false)]));
-  if (!ready || !(modelState.ready || llmGated.groqUsable())) {
+  // (When Groq will answer, or Groq-only mode will send its break message, the local model is not needed at all.)
+  const needLocal = llmGated.needsLocal();
+  const ready = !needLocal || (await Promise.race([modelReady.then(() => true), sleep(MODEL_WAIT_MS).then(() => false)]));
+  if (!ready || (needLocal && !modelState.ready)) {
     co.claim(job.chatId, job.jobId);
     co.release(job.chatId, job.jobId);
     log.warn('Model not ready; reply skipped', { chatId: job.chatId, model: modelState.model, error: modelState.error });
@@ -209,6 +210,11 @@ async function handleJob(job) {
       superseded = true; // a newer message arrived before we said anything: its job re-answers both
       log.info('Reply dropped, newer message arrived', { chatId: job.chatId, jobId: job.jobId });
       await out({ type: 'error', error: 'superseded', silent: true }).catch(() => {}); // release this job's typing reference
+    } else if (err?.name === 'GroqUnavailableError') {
+      // Groq-only mode and no key can answer: the gateway sends the configured "short break" message instead of a reply.
+      lastError = { at: Date.now(), message: err.message };
+      log.warn('Groq-only mode: no answer possible; sending the short-break message', { chatId: job.chatId, kind: err.kind, retryAfterMs: err.retryAfterMs ?? null });
+      await out({ type: 'error', error: 'llm_busy', busy: true, retryAfterMs: err.retryAfterMs ?? null });
     } else {
       lastError = { at: Date.now(), message: err.message };
       log.error('Reply generation failed', { chatId: job.chatId, err });

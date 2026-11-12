@@ -47,12 +47,14 @@ test('durations from Groq headers', () => {
   assert.equal(parseDuration('soon'), null);
 });
 
-test('settings: provider, model and fallback are validated', () => {
-  assert.equal(DEFAULT_SETTINGS.llmProvider, 'ollama');
-  assert.equal(DEFAULT_SETTINGS.groqFallback, true);
-  assert.deepEqual(sanitizeSettings({ llmProvider: 'groq', groqModel: 'llama-3.1-8b-instant', groqFallback: false }).value, { llmProvider: 'groq', groqModel: 'llama-3.1-8b-instant', groqFallback: false });
+test('settings: the three provider modes, the model and the short-break message are validated', () => {
+  assert.equal(DEFAULT_SETTINGS.llmProvider, 'auto', 'adding a key is enough: no second switch to flip');
+  for (const p of ['auto', 'ollama', 'groq']) assert.deepEqual(sanitizeSettings({ llmProvider: p }).value, { llmProvider: p });
   assert.equal(sanitizeSettings({ llmProvider: 'openai' }).errors.length, 1);
   assert.equal(sanitizeSettings({ groqModel: 'bad model!' }).errors.length, 1);
+  assert.deepEqual(sanitizeSettings({ groqBusyMessage: 'On leave 🌴 {name}' }).value, { groqBusyMessage: 'On leave 🌴 {name}' });
+  assert.equal(sanitizeSettings({ groqBusyMessage: '' }).errors.length, 1);
+  assert.match(DEFAULT_SETTINGS.groqBusyMessage, /short break/);
 });
 
 // ------------------------------------------------------------------ key pool
@@ -327,7 +329,7 @@ function mkRouter({ settings = {}, behave, ollama = fakeOllama(), keys = ['a', '
   const pool = new KeyPool();
   pool.setKeys(keysOf(...keys));
   const groq = fakeGroqClient({ pool, behave: behave || (async function* () { yield { type: 'token', text: 'groq answer' }; yield { type: 'done', stats: { provider: 'groq' } }; }) });
-  const s = { ...DEFAULT_SETTINGS, llmProvider: 'groq', groqModel: 'llama-3.3-70b-versatile', groqFallback: true, ...settings };
+  const s = { ...DEFAULT_SETTINGS, llmProvider: 'auto', groqModel: 'llama-3.3-70b-versatile', ...settings };
   const router = new RoutedLlm({ ollama, groq, getSettings: () => s, gates: { ollama: new Semaphore(1), groq: new Semaphore(4) }, localReady: () => true });
   return { router, ollama, groq, pool, s };
 }
@@ -385,15 +387,53 @@ test('router: all keys exhausted → the local model answers; when keys recover 
   assert.equal(text(third), 'groq again');
 });
 
-test('router: with fallback off an exhausted Groq fails instead of switching; a request that already spoke is not switched', async () => {
-  const noFallback = mkRouter({
-    settings: { groqFallback: false },
+test('router: Groq-only mode never uses the local model: exhausted keys fail with GroqUnavailableError (the break message)', async () => {
+  const only = mkRouter({
+    settings: { llmProvider: 'groq' },
     behave: async function* () {
-      throw new GroqUnavailableError('limited', { kind: 'exhausted' });
+      throw new GroqUnavailableError('limited', { kind: 'exhausted', retryAfterMs: 45_000 });
     },
   });
-  await assert.rejects(drain(noFallback.router.chat({ model: 'x', messages: [] })), GroqUnavailableError);
-  assert.equal(noFallback.ollama.calls.length, 0);
+  await assert.rejects(drain(only.router.chat({ model: 'x', messages: [] })), (e) => e instanceof GroqUnavailableError && e.retryAfterMs === 45_000);
+  assert.equal(only.ollama.calls.length, 0, 'the local model is never touched');
+  assert.equal(only.router.status().counters.busy, 1);
+  // every key cooling: it does not even try Groq, and still does not go local
+  only.pool.rateLimited('a', { retryAfterMs: 60_000 });
+  only.pool.rateLimited('b', { retryAfterMs: 60_000 });
+  const callsBefore = only.groq.calls.length;
+  await assert.rejects(drain(only.router.chat({ model: 'x', messages: [] })), GroqUnavailableError);
+  assert.equal(only.groq.calls.length, callsBefore);
+  assert.equal(only.ollama.calls.length, 0);
+  // no key at all
+  const noKey = mkRouter({ settings: { llmProvider: 'groq' }, keys: [] });
+  await assert.rejects(drain(noKey.router.chat({ model: 'x', messages: [] })), (e) => e instanceof GroqUnavailableError && e.kind === 'no_keys');
+  assert.equal(noKey.ollama.calls.length, 0);
+  // a bad request is also "cannot answer", never a silent switch to the local model
+  const bad = mkRouter({
+    settings: { llmProvider: 'groq' },
+    behave: async function* () {
+      throw new GroqRequestError('model does not exist', 404);
+    },
+  });
+  await assert.rejects(drain(bad.router.chat({ model: 'x', messages: [] })), GroqUnavailableError);
+  assert.equal(bad.ollama.calls.length, 0);
+  // and when a key works, Groq-only answers normally
+  const fine = mkRouter({ settings: { llmProvider: 'groq' } });
+  assert.equal(text(await drain(fine.router.chat({ model: 'x', messages: [] }))), 'groq answer');
+});
+
+test('router: needsLocal says when the local model must be loaded', () => {
+  const key = ['a'];
+  assert.equal(mkRouter({ settings: { llmProvider: 'ollama' }, keys: key }).router.needsLocal(), true);
+  assert.equal(mkRouter({ settings: { llmProvider: 'groq' }, keys: [] }).router.needsLocal(), false, 'Groq-only never needs it');
+  assert.equal(mkRouter({ settings: { llmProvider: 'auto' }, keys: key }).router.needsLocal(), false, 'a key is ready');
+  assert.equal(mkRouter({ settings: { llmProvider: 'auto' }, keys: [] }).router.needsLocal(), true, 'no key: auto is local');
+  const cooling = mkRouter({ settings: { llmProvider: 'auto' }, keys: key });
+  cooling.pool.rateLimited('a', { retryAfterMs: 60_000 });
+  assert.equal(cooling.router.needsLocal(), true, 'every key resting: auto needs the local model');
+});
+
+test('router: auto mode — a half-sent reply is not switched', async () => {
 
   const partial = mkRouter({
     behave: async function* () {
@@ -437,7 +477,7 @@ test('router: a request can choose its own provider (playground) without changin
   assert.equal(ollama.calls.length, 1);
 });
 
-test('router: no keys configured → local (or a clear error with fallback off)', async () => {
+test('router: auto with no key configured is simply local', async () => {
   const { router, ollama } = mkRouter({ keys: [] });
   assert.equal(text(await drain(router.chat({ model: 'x', messages: [] }))), 'local answer');
   assert.equal(ollama.calls.length, 1);

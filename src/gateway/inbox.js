@@ -15,6 +15,8 @@ import { TOPICS } from '../bus/index.js';
 import { ownerAsk, ownerHelp, ownerNotice, ownerPendingList, ownerResultLine, parseOwnerCommand, resolveDecision } from '../brain/owner-commands.js';
 import { replyLanguage } from '../brain/lang.js';
 import { EchoTracker } from '../core/echo.js';
+import { SelfChatTracker } from '../core/selfchat.js';
+import { isSystemMessageType } from '../core/msgtypes.js';
 import { confirmationText, declineText, invitationData, invitationHtml } from '../brain/invite.js';
 
 const TEXT_TYPES = new Set(['chat', 'text']);
@@ -22,6 +24,10 @@ const TYPING_REFRESH_MS = 8_000; // the contact's phone drops "typing…" after 
 const TYPING_MAX_MS = 180_000;
 const ERROR_NOTICE_COOLDOWN_MS = 10 * 60_000;
 const UNSUPPORTED_COOLDOWN_MS = 60_000;
+const BUSY_NOTICE_COOLDOWN_MS = 5 * 60_000; // "on a short break" (Groq-only mode) at most once per chat per 5 minutes
+// A 1x1 PNG: the fallback picture for the image-send test when the card cannot be drawn.
+const TINY_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+const TEST_CARD_HTML = '<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;width:1080px;height:1350px;background:#0f9d8a;color:#fff;font:700 110px sans-serif;display:flex;align-items:center;justify-content:center">Card test ✓</body></html>';
 // Message types a person sends on purpose but that we can't read (system notifications are ignored silently).
 const MEDIA_KINDS = {
   ptt: 'voice notes',
@@ -48,6 +54,9 @@ export class Inbox {
     this.echo = new EchoTracker(); // ignores the message_create echoes of what we send ourselves (by message id, then by text)
     this.lastErrorNotice = new Map();
     this.lastUnsupported = new Map();
+    this.lastBusyNotice = new Map();
+    this.selfChat = new SelfChatTracker(); // finds the owner's own "Message yourself" chat (a LID, not the phone id)
+    this.selfChatsLoaded = null;
 
     // Session side effects live here so command, console and idle-timeout endings behave the same.
     sessions.on('start', ({ chatId }) => this.#emitChat(chatId));
@@ -64,9 +73,10 @@ export class Inbox {
 
   async handleIncoming(msg) {
     if (msg.isStatus || msg.from === 'status@broadcast' || msg.broadcast) return;
+    if (isSystemMessageType(msg.type)) return; // encryption/group/call notices are not messages: no row, no contact
     if (msg.fromMe) {
       // our own alerts to the owner's number, or the owner texting themselves ("ok 12" answers an agenda request)
-      await this.#ownerCommand(msg).catch((err) => this.log.warn('Owner command failed', { err }));
+      if (await this.#isSelfChat(msg).catch(() => false)) await this.#ownerCommand(msg).catch((err) => this.log.warn('Owner command failed', { err }));
       return;
     }
     const chatId = msg.from;
@@ -192,11 +202,22 @@ export class Inbox {
     const me = this.wa.me?.wid;
     if (!me || !this.wa.ready) return null;
     try {
-      return await this.#send(me, text);
+      return await this.#sendToSelf(me, text);
     } catch (err) {
       this.log.warn('Could not message the owner', { err });
       return null;
     }
+  }
+
+  /**
+   * Send into the owner's own chat. The echo of this message arrives addressed to the chat's LID, not to `chatId`, and can
+   * beat sendMessage: remember the text and the id so the echo is recognised as ours (and teaches us which chat it is).
+   */
+  async #sendToSelf(chatId, text) {
+    this.selfChat.rememberNotice(text);
+    const sent = await this.#send(chatId, text);
+    this.selfChat.rememberNotice(text, sent?.id?._serialized);
+    return sent;
   }
 
   /**
@@ -205,7 +226,7 @@ export class Inbox {
    * if the card cannot be drawn or sent, the confirmation still goes out as text.
    * @returns {Promise<{sent: boolean, card: boolean}>}
    */
-  async notifyAgendaDecision(item, status) {
+  async notifyAgendaDecision(item, status, { rescheduled = false } = {}) {
     if (!item.chatId || !['confirmed', 'declined'].includes(status)) return { sent: false, card: false };
     const s = this.settings.get();
     // Same language the contact wrote the request in (Hindi, Gujarati, Marathi, Hinglish; English otherwise).
@@ -215,7 +236,11 @@ export class Inbox {
       await this.#sendSystem(item.chatId, declineText(p), 'agenda');
       return { sent: true, card: false };
     }
-    const text = confirmationText(p);
+    // Confirmed before with another time/place? Then this message says "updated", not "confirmed" a second time.
+    const told = `${item.dueAt ? new Date(item.dueAt).toISOString() : ''}|${item.location || ''}`;
+    const before = await this.redis.get(keys.agendaTold(item.id)).catch(() => null);
+    const text = confirmationText({ ...p, rescheduled: rescheduled || (!!before && before !== told) });
+    await this.redis.set(keys.agendaTold(item.id), told, 'EX', 30 * 86_400).catch(() => {});
     if (s.agendaCard) {
       try {
         const png = await this.renderInvitation(item, lang.code);
@@ -251,11 +276,49 @@ export class Inbox {
 
   // -------------------------------------------------- the owner answers from their own WhatsApp
 
-  /** Is this message the owner writing to themselves ("Message yourself")? Only the owner's account can send fromMe. */
-  #isSelfChat(msg) {
-    const me = this.wa.me?.wid;
-    if (!me || !msg.fromMe) return false;
-    return msg.from === msg.to || (phoneFromWid(msg.to) && phoneFromWid(msg.to) === phoneFromWid(me));
+  async #loadSelfChats() {
+    if (!this.selfChatsLoaded) {
+      this.selfChatsLoaded = this.redis
+        .smembers(keys.selfChats)
+        .then((ids) => this.selfChat.load(ids))
+        .catch((err) => {
+          this.log.warn('Could not load the owner chat ids', { err });
+          this.selfChatsLoaded = null; // try again next time
+        });
+    }
+    await this.selfChatsLoaded;
+  }
+
+  async #learnSelfChat(chatId) {
+    if (!this.selfChat.learn(chatId)) return;
+    this.log.info("Learned the owner's own chat", { chatId });
+    await this.redis.sadd(keys.selfChats, chatId).catch(() => {});
+  }
+
+  /**
+   * Is this fromMe message in the owner's own "Message yourself" chat? Only the owner's account can send fromMe, so a
+   * yes here means "the owner writing to themselves" (or us writing to the owner).
+   * That chat is addressed by a LID while our account id is the phone JID, so the id alone is not enough: the echo
+   * of a notice we sent, a quote-reply to one, or WhatsApp's own Contact.isMe teaches us the id (persisted in Redis).
+   */
+  async #isSelfChat(msg) {
+    if (!msg.fromMe || !msg.to) return false;
+    await this.#loadSelfChats();
+    const id = msg.id?._serialized;
+    if (this.selfChat.matchesNotice(msg.body, id)) {
+      await this.#learnSelfChat(msg.to);
+      return true;
+    }
+    if (this.selfChat.isSelf({ fromMe: true, from: msg.from, to: msg.to, me: this.wa.me?.wid })) return true;
+    if (msg.hasQuotedMsg && (await this.#quotedAgendaId(msg))) {
+      await this.#learnSelfChat(msg.to);
+      return true;
+    }
+    if (!String(msg.to).endsWith('@g.us') && (await this.wa.isOwnChat(msg.to).catch(() => false))) {
+      await this.#learnSelfChat(msg.to);
+      return true;
+    }
+    return false;
   }
 
   async #quotedAgendaId(msg) {
@@ -274,14 +337,15 @@ export class Inbox {
    * the same chat. Returns true when the message was an owner command (so it is not logged as a chat message).
    */
   async #ownerCommand(msg) {
-    if (!this.#isSelfChat(msg)) return false;
+    // The caller already established this is the owner's own chat. Our own notices and answers are never commands.
+    if (this.selfChat.matchesNotice(msg.body, msg.id?._serialized)) return false;
     const cmd = parseOwnerCommand(msg.body);
     if (!cmd) return false;
     const id = msg.id?._serialized;
     // The same message can arrive as a 'message' and as a 'message_create' event: act once.
     if (id && !(await this.redis.set(keys.ownerCmd(id), '1', 'EX', 300, 'NX'))) return true;
     const tz = this.settings.get().timezone;
-    const reply = (text) => this.#send(msg.to, text).catch((err) => this.log.warn('Could not answer the owner', { err }));
+    const reply = (text) => this.#sendToSelf(msg.to, text).catch((err) => this.log.warn('Could not answer the owner', { err }));
     if (cmd.type === 'help') {
       await reply(ownerHelp());
       return true;
@@ -326,6 +390,9 @@ export class Inbox {
     for (const chatId of [...this.typing.keys()]) this.#typingStop(chatId, true);
     for (const m of [this.pending, this.recentOut, this.jobs, this.echo, this.lastErrorNotice, this.lastUnsupported]) m.clear(); // EchoTracker has clear() too
     this.sessions.reset();
+    this.selfChat.clear(); // the next account has another own-chat id
+    this.selfChatsLoaded = null;
+    await this.redis.del(keys.selfChats).catch(() => {});
     const counts = await this.repo.wipeChatData();
     let redisKeys = 0;
     for (const pattern of chatKeyPatterns) redisKeys += await deleteKeysMatching(this.redis, pattern);
@@ -356,7 +423,8 @@ export class Inbox {
     this.echo.sent(sent?.id?._serialized);
     const saved = await this.repo.insertMessage({ waMessageId: sent?.id?._serialized, chatId, direction: 'out', body: caption, type: 'image', isAi: true, sentBy: 'ai', intent, latencyMs: 0 });
     if (saved) this.#broadcastMessage(saved, chatId);
-    await this.memory.append(chatId, [{ role: 'assistant', content: caption }]).catch(() => {});
+    // Not appended to the chat memory: confirmation notices in the history made the model repeat them ("Where are you?" →
+    // "Sorry, Mehul can't make this one…").
   }
 
   async #onAgenda(ev) {
@@ -435,7 +503,7 @@ export class Inbox {
     if (ev.type === 'done' || ev.type === 'error') {
       this.jobs.delete(ev.jobId);
       this.#typingStop(chatId);
-      if (ev.type === 'error' && !ev.silent) await this.#errorNotice(chatId);
+      if (ev.type === 'error' && !ev.silent) await (ev.busy ? this.#busyNotice(chatId) : this.#errorNotice(chatId));
       return;
     }
     if (ev.type !== 'chunk' || !ev.text) return;
@@ -493,8 +561,9 @@ export class Inbox {
     const sent = await this.#send(chatId, text);
     const saved = await this.repo.insertMessage({ waMessageId: sent?.id?._serialized, chatId, direction: 'out', body: text, isAi: true, sentBy: 'ai', intent, latencyMs: 0 });
     if (saved) this.#broadcastMessage(saved, chatId);
-    // Keep welcome/goodbye in the conversation so the model knows what "it" already said.
-    await this.memory.append(chatId, [{ role: 'assistant', content: text }]).catch(() => {});
+    // Keep welcome/goodbye in the conversation so the model knows what "it" already said. Agenda confirmations/declines are
+    // not kept: the model parroted them as if they answered the next message.
+    if (intent !== 'agenda') await this.memory.append(chatId, [{ role: 'assistant', content: text }]).catch(() => {});
   }
 
   async #errorNotice(chatId) {
@@ -508,6 +577,53 @@ export class Inbox {
       const saved = await this.repo.insertMessage({ waMessageId: sent.id?._serialized, chatId, direction: 'out', body: text, isAi: true, sentBy: 'ai', intent: 'error' });
       if (saved) this.#broadcastMessage(saved, chatId);
     }
+  }
+
+  /**
+   * "Groq only" mode and Groq cannot answer (every key rate-limited, or Groq is down): say the AI is on a short break
+   * instead of leaving the person hanging or sending a generic error. Once per chat per 5 minutes; not stored in the
+   * chat memory (the model must not learn it as something it said).
+   */
+  async #busyNotice(chatId) {
+    if (Date.now() - (this.lastBusyNotice.get(chatId) || 0) < BUSY_NOTICE_COOLDOWN_MS) return;
+    const s = this.settings.get();
+    if (s.replyMode === 'session' && !(await this.sessions.active(chatId))) return; // they ended the session meanwhile
+    if (await this.redis.exists(keys.takeover(chatId))) return; // the owner is talking to them
+    this.lastBusyNotice.set(chatId, Date.now());
+    const contact = await this.repo.getContactByChatId(chatId).catch(() => null);
+    const text = renderTemplate(s.groqBusyMessage || 'Hey {name}! {persona} is on a short break right now. Please message again in a little while 🙂', s, { name: contact?.name });
+    const sent = await this.#send(chatId, text).catch(() => null);
+    if (sent) {
+      const saved = await this.repo.insertMessage({ waMessageId: sent.id?._serialized, chatId, direction: 'out', body: text, isAi: true, sentBy: 'ai', intent: 'busy' });
+      if (saved) this.#broadcastMessage(saved, chatId);
+    }
+  }
+
+  /**
+   * Diagnostics for the image-send problem: draw a small picture and send it to the owner's own chat with each way in
+   * turn. Returns { chat, rendered, results: [{ strategy, ok, error?, id? }] } and never throws on a failed way.
+   */
+  async testImage({ all = false } = {}) {
+    const me = this.wa.me?.wid;
+    if (!me || !this.wa.ready) throw Object.assign(new Error('WhatsApp is not connected'), { status: 409 });
+    let png = TINY_PNG;
+    let rendered = false;
+    try {
+      png = await this.wa.renderHtml(TEST_CARD_HTML);
+      rendered = true;
+    } catch (err) {
+      this.log.warn('Could not draw the test picture; using a 1x1 image', { err: err.message });
+    }
+    const caption = 'Card test';
+    this.selfChat.rememberNotice(caption);
+    this.echo.expect(me, caption);
+    const results = await this.wa.testImageStrategies(me, png, caption, { all });
+    for (const r of results) {
+      if (!r.id) continue;
+      this.echo.sent(r.id);
+      this.selfChat.rememberNotice(null, r.id);
+    }
+    return { chat: me, rendered, results };
   }
 
   /** Send while remembering the body so the message_create echo is recognised as ours. */
@@ -525,9 +641,14 @@ export class Inbox {
     const chatId = msg.to;
     if (!chatId || chatId === 'status@broadcast') return;
     // Our own AI/console message echoing back (by WhatsApp id, or by text if the event beat sendMessage): not the owner typing.
+    if (isSystemMessageType(msg.type)) return; // encryption/group/call notices: not a message
     if (this.echo.isOurs(chatId, msg.body, msg.id?._serialized)) return;
-    // The owner answering an agenda request in their own chat is a command, not a chat message or a takeover.
-    if (await this.#ownerCommand(msg).catch(() => false)) return;
+    // The owner's own chat ("Message yourself"): our notices and answers, the owner's "ok 12", their notes to self. Never stored as a
+    // chat (it showed up as a phantom chat full of "phone" messages) and never a takeover; a command is acted on.
+    if (await this.#isSelfChat(msg).catch(() => false)) {
+      await this.#ownerCommand(msg).catch((err) => this.log.warn('Owner command failed', { err }));
+      return;
+    }
     if (!(await this.repo.getContactByChatId(chatId))) {
       await this.repo.upsertContactForChat({ chatId, phone: phoneFromWid(chatId), name: null, isGroup: chatId.endsWith('@g.us') });
     }

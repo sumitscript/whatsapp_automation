@@ -239,9 +239,12 @@ Run it from a checkout (with `npm run eval -- --model gemma3:4b`, `OLLAMA_URL` p
 
 1. Create one or more API keys at console.groq.com (a separate key per account/project gives separate rate limits).
 2. Either put them in the server `.env` (`GROQ_API_KEYS=gsk_a,gsk_b`, then `docker compose up -d`), or add them in the console under **Settings → AI provider → Groq API keys** (stored encrypted; the console verifies each key before saving).
-3. In the same card choose **Groq**, pick a model (e.g. `llama-3.3-70b-versatile`, or `llama-3.1-8b-instant` for the highest limits) and save. It applies to the next message.
+3. In the same card pick the mode and a model (e.g. `llama-3.3-70b-versatile`, or `llama-3.1-8b-instant` for the highest limits) and save. It applies to the next message.
+   - **Auto** (default): Groq as soon as a key is added; the local model takes over when every key is used up or Groq is down.
+   - **Local only**: the model on this server, Groq is never used.
+   - **Groq only**: never the local model. When no key can answer, the contact gets the "short break" message you set in the same card (once per 5 minutes per chat).
 
-Behaviour: keys are used in turn; when one reports a rate limit the next key serves the same request immediately; when every key is rate-limited or Groq is unreachable the local Ollama model answers (turn this off with "Fall back to the local model"). Keep the local model installed: it is the fallback and also does memory summaries and agenda extraction. Stored keys are encrypted with a key derived from `JWT_SECRET`; if you rotate `JWT_SECRET`, add the console keys again. The Settings card shows each key's live state (ready, rate-limited with a countdown, rejected) and how many calls each served.
+Behaviour: keys are used in turn; when one reports a rate limit the next key serves the same request immediately; when every key is rate-limited or Groq is unreachable, Auto mode answers with the local Ollama model and Groq-only mode sends the short-break message. Keep the local model installed: it is the fallback and also does memory summaries and agenda extraction. Stored keys are encrypted with a key derived from `JWT_SECRET`; if you rotate `JWT_SECRET`, add the console keys again. The Settings card shows each key's live state (ready, rate-limited with a countdown, rejected) and how many calls each served.
 
 ## Answering agenda requests from your own WhatsApp
 

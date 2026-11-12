@@ -9,7 +9,7 @@ import { INTENT_PROFILES, isFollowUp, resolveIntent } from './intent.js';
 import { replyLanguage, statedLanguagePreference } from './lang.js';
 import { MessageChunker } from './format.js';
 import { isRepeat, recentBubbles } from './repeat.js';
-import { asksAboutPlans, buildExtractionMessages, guessLocation, heuristicItem, isMeetingRequest, isPassOnRequest, meetingKind, mentionsMeeting, parseExtraction, parseWhen, resolveItems } from './agenda.js';
+import { asksAboutPlans, buildExtractionMessages, guessLocation, heuristicItem, isMeetingRequest, isPassOnRequest, meetingKind, mentionsMeeting, parseExtraction, parseWhen, resolveItems, wantsToMeet } from './agenda.js';
 import { meetingAck, passOnAck } from './invite.js';
 import { estimateTokens, normalize } from '../rag/text.js';
 import { ownerAliasList, renderPersona } from '../core/settings-schema.js';
@@ -198,7 +198,8 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
       const before = theirMessages.slice(-3).join('\n');
       let ack = null;
       let ackIntent = 'meeting';
-      if (isMeetingRequest(text) || (hit && before && mentionsMeeting(before))) {
+      // "I want to meet you" / "mujhe aapse milna hai" (no time yet) is answered with the "which day, time and place?" template too.
+      if (isMeetingRequest(text) || (hit && before && mentionsMeeting(before)) || wantsToMeet(text)) {
         ack = meetingAck({
           code: lang.code,
           name: contactName,
@@ -296,7 +297,7 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
       stats = null;
       chunker = new MessageChunker({ split: settings.humanize });
       try {
-        for await (const ev of llm.chat({ model: settings.model, messages: req, temperature: retry ? Math.min(1.1, temperature + 0.25) : temperature, maxTokens, signal: sig, provider: settings.llmProvider, groqModel: settings.groqModel, groqFallback: settings.groqFallback })) {
+        for await (const ev of llm.chat({ model: settings.model, messages: req, temperature: retry ? Math.min(1.1, temperature + 0.25) : temperature, maxTokens, signal: sig, provider: settings.llmProvider, groqModel: settings.groqModel })) {
           if (ev.type === 'meta') {
             // The router says which provider/model is answering (Groq key pool or the local model); show it, not the setting.
             liveMeta.model = ev.model || liveMeta.model;
@@ -427,7 +428,8 @@ Return ONLY the updated notes.`,
     const userTexts = turns.filter((t) => t.role === 'user').map((t) => t.content);
     const resolved = items ? resolveItems(items, { text, userTexts, now, timeZone }) : [];
     // A small model often leaves `location` empty even when the message names a place.
-    const place = guessLocation(`${userTexts.slice(-3, -1).join('. ')}. ${text}`);
+    // The place named in the CURRENT message wins; an earlier one is only a fallback (joining them let the older place win).
+    const place = guessLocation(text) || guessLocation(userTexts.slice(-3, -1).join('. '));
     const withPlace = (list) => list.map((it) => (it.location || !place ? it : { ...it, location: place }));
     if (resolved.length) return withPlace(resolved);
     // The model failed or found nothing: a plain "let's meet tomorrow at 5" is still worth keeping.
