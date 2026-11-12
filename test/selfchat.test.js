@@ -102,3 +102,18 @@ test('image send: nothing works → no message and every error listed; diagnosti
   assert.equal(all.strategy, 'direct');
   assert.deepEqual(all.results.map((x) => [x.strategy, x.ok]), [['direct', true], ['document', false], ['chat', true]]);
 });
+
+test('a send that resolves to null still counts as sent (wwebjs sometimes returns null for a delivered message)', async () => {
+  const calls = [];
+  const ways = [
+    { name: 'direct', run: async () => { calls.push('direct'); return null; } },
+    { name: 'document', run: async () => { calls.push('document'); return { id: { _serialized: 'x' } }; } },
+  ];
+  const r = await trySendStrategies(ways);
+  assert.equal(r.strategy, 'direct', 'the first way that resolves wins, even with no message object');
+  assert.deepEqual(calls, ['direct'], 'and no second copy is sent');
+  assert.equal(r.results[0].ok, true);
+  const failing = await trySendStrategies([{ name: 'direct', run: async () => { throw new Error('boom'); } }]);
+  assert.equal(failing.strategy, null);
+  assert.equal(failing.results[0].error, 'boom');
+});

@@ -299,7 +299,9 @@ export class WhatsAppManager extends EventEmitter {
       this.imageWarned.add(key);
       this.log.warn('Image send way failed', { strategy: r.strategy, error: r.error });
     }
-    if (!sent) throw new Error(`Every image send way failed (${results.map((r) => `${r.strategy}: ${r.error}`).join(' | ')})`);
+    // A way "worked" when it resolved, even to null: whatsapp-web.js's sendMessage sometimes resolves to null for a message that WAS
+    // sent (wwebjs#3767). Judging by the returned object made a delivered card look like a failure and the text went out as well.
+    if (!strategy) throw new Error(`Every image send way failed (${results.map((r) => `${r.strategy}: ${r.error ?? 'no result'}`).join(' | ')})`);
     if (strategy !== this.lastImageStrategy) this.log.info('Image sent', { strategy, previously: this.lastImageStrategy });
     this.lastImageStrategy = strategy;
     return sent;
