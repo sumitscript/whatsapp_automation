@@ -402,10 +402,15 @@ export async function mount(root, { hub }) {
           : k.state === 'cooling'
             ? html`<span class="badge badge-warn">Rate-limited · ${cooldownText(k.cooldownMs)}</span>`
             : html`<span class="badge badge-bad">Rejected</span>`;
-      const used = `${formatNumber(k.requests)} calls${k.limited ? ` · ${k.limited} limited` : ''}`;
+      // Counted in Redis by both the worker and the gateway, so it matches console.groq.com and survives restarts.
+      const compact = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n));
+      const u = k.usage;
+      const used = u
+        ? html`Today: ${formatNumber(u.today.calls)} calls · ${compact(u.today.tokens)} tokens${u.today.limited ? ` · ${u.today.limited} rate-limited` : ''}<div>30 days: ${formatNumber(u.d30.calls)} calls · ${compact(u.d30.tokens)} tokens</div>`
+        : html`<span>No usage recorded yet</span>`;
       const remove = k.source === 'console' ? html` <button class="btn btn-ghost btn-sm agenda-del" data-act="remove" data-id="${k.id}" data-label="${k.label}">Remove</button>` : '';
       const why = k.lastError && k.state !== 'ready' ? html`<div class="muted small">${k.lastError}</div>` : '';
-      return html`<tr><td><strong>${k.label}</strong><div class="muted small">${k.hint} · ${k.source === 'env' ? 'server env' : 'console'}</div></td><td>${raw(pill)}${raw(why)}</td><td class="muted small">${used}</td><td class="actions"><button class="btn btn-ghost btn-sm" data-act="test" data-id="${k.id}">Test</button>${raw(remove)}</td></tr>`;
+      return html`<tr><td><strong>${k.label}</strong><div class="muted small">${k.hint} · ${k.source === 'env' ? 'server env' : 'console'}</div></td><td>${raw(pill)}${raw(why)}</td><td class="muted small">${raw(used)}</td><td class="actions"><button class="btn btn-ghost btn-sm" data-act="test" data-id="${k.id}">Test</button>${raw(remove)}</td></tr>`;
     });
     $('#gq-keys', root).innerHTML = rows.length
       ? html`<table class="table"><thead><tr><th>Key</th><th>Status</th><th>Usage</th><th></th></tr></thead><tbody>${raw(rows.join(''))}</tbody></table>`

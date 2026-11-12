@@ -46,7 +46,10 @@ const NAMED = {
 const LANG_NAMES = Object.keys(NAMED).join('|');
 // "I prefer hinglish", "reply in hindi", "hinglish mein baat karo", "talk to me in english please"
 const PREFERENCE = new RegExp(
-  `\\b(?:prefer(?:s|red)?|reply in|respond in|talk in|speak in|write in|chat in|text in|baat karo|bolo|likho)\\b[^.\\n]{0,20}?\\b(${LANG_NAMES})\\b|\\b(${LANG_NAMES})\\b[^.\\n]{0,12}?\\b(?:mein|me|mai|please|pls|only)\\b[^.\\n]{0,12}?\\b(?:baat|bolo|likho|reply|karo|talk)`,
+  // 1: "I prefer hinglish", "reply in hindi", "talk to me in English", "speak with me in hindi", "baat karo english"
+  // 2: "hinglish mein baat karo", "english please, reply"
+  // 3: a message that is only the language: "English", "in english please"
+  `\\b(?:prefer(?:s|red)?|(?:reply|respond|answer|talk|speak|write|chat|text|message)(?:\\s+(?:to|with)\\s+me)?\\s+(?:in|using)|baat karo|bolo|likho)\\b[^.\\n]{0,20}?\\b(${LANG_NAMES})\\b|\\b(${LANG_NAMES})\\b[^.\\n]{0,12}?\\b(?:mein|me|mai|please|pls|only)\\b[^.\\n]{0,12}?\\b(?:baat|bolo|likho|reply|karo|talk)|^\\s*(?:in\\s+)?(${LANG_NAMES})\\s*(?:please|pls|plz|only)?\\s*[.!]*\\s*$`,
   'i',
 );
 
@@ -57,7 +60,7 @@ const PREFERENCE = new RegExp(
 export function statedLanguagePreference(texts) {
   for (let i = texts.length - 1; i >= 0; i--) {
     const m = String(texts[i] ?? '').toLowerCase().match(PREFERENCE);
-    if (m) return NAMED[m[1] || m[2]] ?? null;
+    if (m) return NAMED[m[1] || m[2] || m[3]] ?? null;
   }
   return null;
 }
@@ -72,7 +75,15 @@ export function statedLanguagePreference(texts) {
  */
 export function replyLanguage(text, previous = [], notes = null) {
   const current = detectLanguage(text);
-  const stated = statedLanguagePreference([...(notes ? [notes] : []), ...previous, text]);
+  // "Talk to me in English" said in this chat is explicit and newest-wins. A preference that only comes from the long-term notes
+  // ("Prefers Hinglish" from an old chat) gives way once the person has been writing plain English for a few messages.
+  const fromChat = statedLanguagePreference([...previous, text]);
+  const fromNotes = notes ? statedLanguagePreference([notes]) : null;
+  let stated = fromChat || fromNotes;
+  if (!fromChat && fromNotes && current.code === 'en') {
+    const recent = previous.slice(-2).map(detectLanguage);
+    if (recent.length >= 2 && recent.every((l) => l.code === 'en')) stated = null;
+  }
   // Writing in a native script (Devanagari, Tamil…) is itself the strongest signal.
   if (stated && current.script !== 'native') return { ...stated, reason: 'preference' };
   if (current.code === 'en') {

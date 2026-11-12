@@ -28,6 +28,7 @@ export class KeyPool {
     this.maxCooldownMs = maxCooldownMs;
     this.keys = new Map(); // id → state
     this.seq = 0;
+    this.usageSink = null; // (keyId, { calls, ok, tokens, limited, errors }) => void: persists usage outside this process (UsageStore)
   }
 
   /** Replace the key list, keeping the usage/cooldown state of keys that are still present. */
@@ -82,12 +83,14 @@ export class KeyPool {
     k.usedSeq = ++this.seq;
     k.lastUsedAt = this.now();
     k.requests++;
+    this.usageSink?.(k.id, { calls: 1 });
     return { id: k.id, secret: k.secret, label: k.label };
   }
 
-  success(id, { remainingTokens, remainingRequests, resetTokensMs, resetRequestsMs, tokens = 0 } = {}) {
+  success(id, { remainingTokens, remainingRequests, resetTokensMs, resetRequestsMs, tokens = 0, done = false } = {}) {
     const k = this.keys.get(id);
     if (!k) return;
+    if (done) this.usageSink?.(id, { ok: 1, tokens }); // the reply finished (the earlier success() is just the response headers)
     k.failStreak = 0;
     k.lastError = null;
     k.tokens += tokens;
@@ -103,6 +106,7 @@ export class KeyPool {
     const k = this.keys.get(id);
     if (!k) return;
     k.limited++;
+    this.usageSink?.(id, { limited: 1 });
     k.lastError = reason;
     k.cooldownUntil = this.now() + Math.min(Math.max(retryAfterMs ?? this.defaultCooldownMs, 1000), this.maxCooldownMs);
   }
@@ -113,6 +117,7 @@ export class KeyPool {
     if (!k) return;
     k.disabled = true;
     k.errors++;
+    this.usageSink?.(id, { errors: 1 });
     k.lastError = reason;
   }
 
@@ -121,6 +126,7 @@ export class KeyPool {
     const k = this.keys.get(id);
     if (!k) return;
     k.errors++;
+    this.usageSink?.(id, { errors: 1 });
     k.failStreak++;
     k.lastError = reason;
     k.cooldownUntil = this.now() + Math.min(2000 * 2 ** (k.failStreak - 1), 60_000);

@@ -403,7 +403,7 @@ function explicitDate(today, d, m, y) {
 
 // All gates run on normalizeTimeText(): lower-cased, with Hindi/Marathi/Gujarati words and digits folded to Latin tokens.
 const MEET =
-  /\b(meet|meeting|meetup|catch ?up|call|calling|lunch|dinner|breakfast|brunch|coffee|visit|appointment|schedule[d]?|reschedule|interview|demo|discussion|sync|session|hangout|come over|coming|get together|milte|milenge|milna|milein|milunga|mil sakte|mil lete|mulakat|bulana|aana|aaunga|aaungi|aaoge|baat karni|baat karte|call karna|call karo|phone karna|phone karo|malishu|malvu|bhetu|ghar aana)\b/i;
+  /\b(meet|meeting|meetup|catch ?up|call|calling|lunch|dinner|breakfast|brunch|coffee|visit|appointment|schedule[d]?|reschedule|interview|demo|discussion|sync|session|hangout|come over|coming|get together|milte|milenge|milna|milein|milunga|mil sakte|mil lete|mulakat|bulana|aana|aaunga|aaungi|aaoge|baat karni|baat karte|call karna|call karo|phone karna|phone karo|malishu|malvu|bhetu|ghar aana|fix (?:a |the |me a )?(?:date|time|slot)|date fix|time fix|book (?:a |the |me a )?(?:slot|time|date|meeting|appointment)|set up (?:a )?(?:meeting|call|appointment))\b/i;
 const TODO =
   /\b(remind(?:er)?|remember to|don'?t forget|dont forget|todo|to-do|deadline|due (?:on|by|date)|submit|send me|share (?:the|your|it)|follow ?up|call ?back|yaad dil\w*|yaad rakh\w*)\b/i;
 const STRONG_TIME =
@@ -502,6 +502,8 @@ const WANTS_TO_MEET = [
   /\bmil(?:na|ne|unga|ungi)\s+(?:hai|tha|thi|chahta|chahti|chahte|ka\s+man|ka\s+mann|ki\s+iccha)\b/,
   /\b(?:mujhe|mereko|mujhko|hume|humein)\b[^.?!]{0,30}\bmil(?:na|ne|unga|ungi)\b/,
   /\b(?:meet|mulakat|baat|call)\s+(?:karna|karni|karne)\s+(?:hai|tha|thi|chahta|chahti)\b/,
+  // "fix a date for me", "book a slot", "set up a call": asking the twin to pin down a time is asking for a meeting
+  /\b(?:fix|book|arrange|set\s+up)\s+(?:a\s+|the\s+|me\s+a\s+)?(?:date|time|slot|meeting|appointment|call)\b/,
 ];
 export function wantsToMeet(text) {
   if (TEXT_TASK.test(String(text ?? ''))) return false;

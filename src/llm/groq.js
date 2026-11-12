@@ -170,7 +170,7 @@ export class GroqClient {
     } finally {
       watch.stop();
     }
-    this.pool.success(key.id, { tokens: usage?.total_tokens || 0 });
+    this.pool.success(key.id, { tokens: usage?.total_tokens || (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0), done: true });
     const ms = (s) => Math.round((Number(s) || 0) * 1000);
     yield {
       type: 'done',

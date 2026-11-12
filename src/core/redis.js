@@ -14,6 +14,7 @@ export const keys = Object.freeze({
   waStatus: `${P}wa:status`,
   workerStatus: `${P}worker:status`,
   agendaMsg: (waMessageId) => `${P}agenda:msg:${waMessageId}`, // owner notice message → agenda item number (for quote-replies)
+  llmUsage: (keyId, day) => `${P}llmusage:${keyId}:${day}`, // per-key Groq usage counters (hash), one per day
   ownerCmd: (waMessageId) => `${P}ownercmd:${waMessageId}`, // an owner command already handled (dedupe)
   agendaTold: (itemId) => `${P}agenda:told:${itemId}`, // what time/place the contact was last told for an agenda item (to say "updated" next time)
   selfChats: `${P}selfchats`, // SET of the owner's own chat ids (the LID of "Message yourself"), learned from our notices

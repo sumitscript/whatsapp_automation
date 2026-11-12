@@ -17,6 +17,7 @@ import { KeyPool } from '../llm/key-pool.js';
 import { KeyStore } from '../llm/key-store.js';
 import { GroqClient } from '../llm/groq.js';
 import { RoutedLlm } from '../llm/router.js';
+import { UsageStore } from '../llm/usage.js';
 import { createBrain } from '../brain/pipeline.js';
 import { createAvailability } from '../brain/availability.js';
 import { looksLikeCommitmentInContext, sameItem } from '../brain/agenda.js';
@@ -48,6 +49,9 @@ const memory = createRedisMemory(redis);
 // Groq: several API keys in a pool (env + console). A rate-limited key is skipped instantly; when all are exhausted
 // the call falls back to the local model. Which one serves a call is decided per call by the router (src/llm/router.js).
 const groqPool = new KeyPool();
+// Usage counters live in Redis (shared with the gateway, survive restarts): what the console shows next to each key.
+const usage = new UsageStore({ redis, keyFor: keys.llmUsage, getTimezone: () => settings.get().timezone, onError: (err) => log.debug('Could not record Groq usage', { err: err.message }) });
+groqPool.usageSink = (id, d) => usage.record(id, d);
 const keyStore = new KeyStore({ pool: groqPool, repo, secret: config.auth.jwtSecret, envKeys: config.groq.keys, logger: log });
 await keyStore.start();
 await sub.subscribe(channels.llmKeys);

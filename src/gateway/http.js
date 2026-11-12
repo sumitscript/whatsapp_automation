@@ -250,11 +250,17 @@ export function createApp(deps) {
     }
     const live = new Map((worker?.keys || []).map((k) => [k.id, k]));
     const s = settings.get();
+    let usage = {};
+    try {
+      usage = await groqDeps.usage.summary(groqDeps.pool.status().map((k) => k.id));
+    } catch {
+      /* the counters are a convenience: show the keys without them */
+    }
     res.json({
       provider: s.llmProvider,
       model: s.groqModel,
       envKeys: groqDeps.pool.status().filter((k) => k.source === 'env').length,
-      keys: groqDeps.pool.status().map((k) => ({ ...k, ...(live.get(k.id) ? { ...live.get(k.id), label: k.label, hint: k.hint, source: k.source } : {}) })),
+      keys: groqDeps.pool.status().map((k) => ({ ...k, ...(live.get(k.id) ? { ...live.get(k.id), label: k.label, hint: k.hint, source: k.source } : {}), usage: usage[k.id] || null })),
       counters: worker?.counters ?? null,
       lastFallback: worker?.lastFallback ?? null,
       groqReady: worker?.groqReady ?? groqDeps.pool.hasAvailable(),

@@ -5,7 +5,7 @@ import './env.js';
 import http from 'node:http';
 import { config } from '../core/config.js';
 import { logger } from '../core/logger.js';
-import { attachRedisLogSink, channels, createRedis, createRedisAnswerCache, createRedisMemory } from '../core/redis.js';
+import { attachRedisLogSink, channels, createRedis, createRedisAnswerCache, createRedisMemory, keys } from '../core/redis.js';
 import { createSettingsService } from '../core/settings.js';
 import { createPool, migrate } from '../db/pg.js';
 import { createRepo } from '../db/repo.js';
@@ -17,6 +17,7 @@ import { KeyPool } from '../llm/key-pool.js';
 import { KeyStore } from '../llm/key-store.js';
 import { GroqClient } from '../llm/groq.js';
 import { RoutedLlm } from '../llm/router.js';
+import { UsageStore } from '../llm/usage.js';
 import { Semaphore } from '../core/util.js';
 import { createBrain } from '../brain/pipeline.js';
 import { createAvailability } from '../brain/availability.js';
@@ -52,6 +53,8 @@ const llm = new OllamaClient({ ...config.ollama, timeoutMs: config.ollama.reques
 const memory = createRedisMemory(redis);
 // Groq keys + router for the console's playground (the worker has its own pool for live chats; both read the same key list).
 const groqPool = new KeyPool();
+const usage = new UsageStore({ redis, keyFor: keys.llmUsage, getTimezone: () => settings.get().timezone, onError: (err) => log.debug('Could not record Groq usage', { err: err.message }) });
+groqPool.usageSink = (id, d) => usage.record(id, d);
 const keyStore = new KeyStore({ pool: groqPool, repo, secret: config.auth.jwtSecret, envKeys: config.groq.keys, logger: log });
 await keyStore.start();
 await sub.subscribe(channels.llmKeys);
@@ -76,7 +79,7 @@ const sessions = new SessionManager({ repo, settings, logger: log });
 sessions.startSweeper(); // ends idle sessions (sessionIdleMinutes)
 const inbox = new Inbox({ wa, repo, redis, bus, settings, memory, sessions, hub, availability, logger: log });
 
-const app = createApp({ auth, repo, redis, wa, inbox, settings, kb, llm, brain, memory, hub, availability, groq: { pool: groqPool, client: groq, store: keyStore, router }, logger: log });
+const app = createApp({ auth, repo, redis, wa, inbox, settings, kb, llm, brain, memory, hub, availability, groq: { pool: groqPool, client: groq, store: keyStore, router, usage }, logger: log });
 const server = http.createServer(app);
 const realtime = await createRealtime(server, { auth, wa, subscriber: sub, logger: log });
 hub.emit = realtime.emit;
