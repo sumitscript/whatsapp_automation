@@ -12,7 +12,9 @@ import { deleteKeysMatching, KeyedQueue, normalizePhone, phoneFromWid, sleep, ui
 import { renderTemplate } from '../core/settings-schema.js';
 import { helpText, parseCommand } from '../brain/commands.js';
 import { TOPICS } from '../bus/index.js';
-import { ownerAsk, ownerHelp, ownerNotice, ownerPendingList, ownerResultLine, parseOwnerCommand, resolveDecision } from '../brain/owner-commands.js';
+import { ownerAsk, ownerHelp, ownerNotice, ownerPendingList, ownerResultLine, ownerSlotsText, parseOwnerCommand, resolveDecision } from '../brain/owner-commands.js';
+import { formatWhen } from '../brain/agenda.js';
+import { clashLines, slotsText } from '../brain/slots.js';
 import { replyLanguage } from '../brain/lang.js';
 import { EchoTracker } from '../core/echo.js';
 import { SelfChatTracker } from '../core/selfchat.js';
@@ -43,8 +45,8 @@ const MEDIA_KINDS = {
 };
 
 export class Inbox {
-  constructor({ wa, repo, redis, bus, settings, memory, sessions, hub, logger }) {
-    Object.assign(this, { wa, repo, redis, bus, settings, memory, sessions, hub });
+  constructor({ wa, repo, redis, bus, settings, memory, sessions, hub, availability = null, logger }) {
+    Object.assign(this, { wa, repo, redis, bus, settings, memory, sessions, hub, availability });
     this.log = logger.child({ component: 'inbox' });
     this.pending = new Map(); // chatId → debounce buffer
     this.recentOut = new Map(); // chatId → last sent bubbles (duplicate guard)
@@ -233,7 +235,13 @@ export class Inbox {
     const lang = replyLanguage(item.sourceMessage || item.title || '', [], null);
     const p = { code: lang.code, name: item.contactName, owner: s.ownerName, title: item.title, dueAt: item.dueAt, allDay: item.allDay, place: item.location, timeZone: s.timezone };
     if (status === 'declined') {
-      await this.#sendSystem(item.chatId, declineText(p), 'agenda');
+      // A declined meeting offers the owner's free times, so the conversation can continue instead of ending.
+      let slots = '';
+      if (this.availability && item.kind === 'appointment') {
+        const free = await this.availability.freeSlots({ count: 4, perDay: 2 }).catch(() => []);
+        slots = slotsText(free, s.timezone, ['hi', 'mr', 'gu'].includes(lang.code) ? lang.code : 'en');
+      }
+      await this.#sendSystem(item.chatId, declineText({ ...p, slots }), 'agenda');
       return { sent: true, card: false };
     }
     // Confirmed before with another time/place? Then this message says "updated", not "confirmed" a second time.
@@ -258,10 +266,19 @@ export class Inbox {
    * Apply an owner decision to an agenda item: set the status, tell the contact (confirm/decline), refresh the console.
    * Used by the owner's WhatsApp replies; the console's PATCH does the same steps with its own field edits.
    */
-  async decideAgenda(item, action) {
+  async decideAgenda(item, action, { force = false } = {}) {
     const status = { confirm: 'confirmed', decline: 'declined', done: 'done' }[action];
     if (!status) return { item, action, error: 'unknown action' };
     if (item.status === status) return { item, action, skipped: true };
+    // Never double-book by accident: a confirmation that clashes (a confirmed meeting, a block, outside hours) waits for "force".
+    if (action === 'confirm' && !force && this.availability && item.kind === 'appointment' && item.dueAt && !item.allDay) {
+      const av = await this.availability.assess(item.dueAt, { ignoreId: item.id }).catch(() => null);
+      if (av && !av.ok) {
+        const tz = this.settings.get().timezone;
+        const free = await this.availability.freeSlots({ count: 4, perDay: 2 }).catch(() => []);
+        return { item, action, clash: clashLines(av, { timeZone: tz, formatWhen }), freeText: slotsText(free, tz) };
+      }
+    }
     const updated = await this.repo.updateAgendaItem(item.id, { status });
     let r = { sent: false, card: false };
     if (action !== 'done' && this.settings.get().agendaConfirm) {
@@ -356,6 +373,12 @@ export class Inbox {
       await reply(ownerPendingList(pending, { timeZone: tz }));
       return true;
     }
+    if (cmd.type === 'slots') {
+      if (!this.availability) return false;
+      const o = await this.availability.overview({ days: 7, count: 8, perDay: 3 });
+      await reply(ownerSlotsText({ slotsLine: slotsText(o.slots, tz), meetings: o.meetings, timeZone: tz }));
+      return true;
+    }
     const quotedId = await this.#quotedAgendaId(msg);
     const lookup = new Map(open.map((i) => [i.id, i]));
     for (const wanted of [...(cmd.ids || []), quotedId].filter(Boolean)) if (!lookup.has(wanted)) lookup.set(wanted, await this.repo.getAgendaItem(wanted));
@@ -368,7 +391,7 @@ export class Inbox {
     const lines = [];
     for (const item of d.targets) {
       try {
-        lines.push(ownerResultLine(await this.decideAgenda(item, d.action)));
+        lines.push(ownerResultLine(await this.decideAgenda(item, d.action, { force: !!cmd.force })));
       } catch (err) {
         this.log.error('Owner command failed', { id: item.id, err });
         lines.push(ownerResultLine({ item, error: 'something went wrong, try the console' }));
@@ -434,8 +457,22 @@ export class Inbox {
     if (!s.notifyOwnerOnAgenda || (!ev.created && !ev.changed)) return;
     const item = await this.repo.getAgendaItem(ev.itemId);
     if (!item || (!ev.created && item.status !== 'pending')) return;
+    // A request that lands on a confirmed meeting, a block or outside working hours says so, with free times to offer instead.
+    let clash = [];
+    let blocking = false;
+    if (this.availability && item.kind === 'appointment' && item.dueAt && !item.allDay) {
+      const av = await this.availability.assess(item.dueAt, { ignoreId: item.id }).catch(() => null);
+      if (av && !av.skipped) {
+        clash = clashLines(av, { timeZone: s.timezone, formatWhen });
+        blocking = !av.ok;
+        if (blocking) {
+          const free = await this.availability.freeSlots({ count: 4, perDay: 2 }).catch(() => []);
+          if (free.length) clash.push(`Free: ${slotsText(free, s.timezone)}`);
+        }
+      }
+    }
     // Every request carries its number (#id); the owner answers "ok 12" from their own WhatsApp, or quote-replies "ok".
-    const sent = await this.#sendToOwner(ownerNotice(item, { timeZone: s.timezone, updated: !ev.created }));
+    const sent = await this.#sendToOwner(ownerNotice(item, { timeZone: s.timezone, updated: !ev.created, clash, blocking }));
     const sentId = sent?.id?._serialized;
     if (sentId) await this.redis.set(keys.agendaMsg(sentId), String(item.id), 'EX', 14 * 86_400).catch(() => {});
   }

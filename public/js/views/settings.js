@@ -83,6 +83,19 @@ export async function mount(root, { hub }) {
             <label class="field"><span>Timezone for "tomorrow at 5pm"</span><input name="timezone" placeholder="Asia/Kolkata" />
               <small class="muted">IANA name, e.g. Asia/Kolkata, Europe/London, America/New_York</small></label>
 
+            <h3 class="section-title">Availability</h3>
+            <p class="muted small">Meetings are only offered and confirmed inside these hours (in the timezone above) and never on top of another confirmed meeting. A request for a taken time gets "not available" plus your free slots.</p>
+            <label class="switch-row"><input type="checkbox" class="switch" name="enforceAvailability" /><span>Check availability<small class="muted"> — tell people a taken or out-of-hours time is unavailable, and ask you before double-booking</small></span></label>
+            <div class="form-grid">
+              <label class="field"><span>Working hours start</span><input type="time" name="workStart" /></label>
+              <label class="field"><span>Working hours end</span><input type="time" name="workEnd" /></label>
+              <label class="field"><span>Meeting length (minutes)</span><input type="number" name="meetingMinutes" min="5" max="480" step="5" /></label>
+              <label class="field"><span>Gap around meetings (minutes)</span><input type="number" name="meetingBufferMinutes" min="0" max="240" step="5" /></label>
+            </div>
+            <fieldset class="field"><legend>Days you take meetings</legend>
+              <div class="chip-group"><label class="chip"><input type="checkbox" name="wd" value="mon" /> Mon</label><label class="chip"><input type="checkbox" name="wd" value="tue" /> Tue</label><label class="chip"><input type="checkbox" name="wd" value="wed" /> Wed</label><label class="chip"><input type="checkbox" name="wd" value="thu" /> Thu</label><label class="chip"><input type="checkbox" name="wd" value="fri" /> Fri</label><label class="chip"><input type="checkbox" name="wd" value="sat" /> Sat</label><label class="chip"><input type="checkbox" name="wd" value="sun" /> Sun</label></div>
+            </fieldset>
+
             <h3 class="section-title">Memory &amp; context</h3>
             <div class="form-grid">
               <label class="field"><span>Max turns kept verbatim</span><input type="number" name="historyTurns" min="0" max="50" /></label>
@@ -178,8 +191,10 @@ export async function mount(root, { hub }) {
       'replyMode', 'ownerName', 'persona', 'temperature', 'maxTokens', 'historyTurns', 'historyTokens', 'debounceMs',
       'humanize', 'answerCache', 'prefillAhead', 'replyInGroups', 'memoryEnabled', 'personaName', 'startCommands', 'stopCommands',
       'welcomeMessage', 'goodbyeMessage', 'sessionIdleMinutes', 'takeoverSeconds',
-      'notifyOnTimeout', 'timeoutMessage', 'unsupportedMessage', 'agendaEnabled', 'notifyOwnerOnAgenda', 'meetingAck', 'agendaConfirm', 'agendaCard', 'alertOwner', 'timezone',
+      'notifyOnTimeout', 'timeoutMessage', 'unsupportedMessage', 'agendaEnabled', 'notifyOwnerOnAgenda', 'meetingAck', 'agendaConfirm', 'agendaCard', 'alertOwner', 'timezone', 'workStart', 'workEnd', 'meetingMinutes', 'meetingBufferMinutes', 'enforceAvailability',
     ].forEach((k) => set(k, st[k]));
+    const wd = String(st.workDays || '').split(',');
+    form.querySelectorAll('input[name="wd"]').forEach((cb) => (cb.checked = wd.includes(cb.value)));
     $('#temp-out', root).textContent = Number(form.temperature.value).toFixed(2);
   }
 
@@ -221,6 +236,12 @@ export async function mount(root, { hub }) {
       agendaCard: form.agendaCard.checked,
       alertOwner: form.alertOwner.checked,
       timezone: form.timezone.value.trim(),
+      workStart: form.workStart.value,
+      workEnd: form.workEnd.value,
+      workDays: [...form.querySelectorAll('input[name="wd"]:checked')].map((c) => c.value).join(',') || undefined,
+      meetingMinutes: num('meetingMinutes'),
+      meetingBufferMinutes: num('meetingBufferMinutes'),
+      enforceAvailability: form.enforceAvailability.checked,
     };
     try {
       const { settings } = await api.saveSettings(partial);

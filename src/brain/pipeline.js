@@ -10,7 +10,8 @@ import { replyLanguage, statedLanguagePreference } from './lang.js';
 import { MessageChunker } from './format.js';
 import { isRepeat, recentBubbles } from './repeat.js';
 import { asksAboutPlans, buildExtractionMessages, guessLocation, guessLocationFromContext, heuristicItem, isMeetingRequest, isPassOnRequest, meetingKind, mentionsMeeting, parseExtraction, parseWhen, resolveItems, wantsToMeet } from './agenda.js';
-import { meetingAck, passOnAck } from './invite.js';
+import { meetingAck, passOnAck, slotTakenAck } from './invite.js';
+import { slotsText } from './slots.js';
 import { estimateTokens, normalize } from '../rag/text.js';
 import { ownerAliasList, renderPersona } from '../core/settings-schema.js';
 import { clamp, sha1 } from '../core/util.js';
@@ -94,7 +95,7 @@ export function selectHistory(turns, { maxMessages, maxTokens }) {
   return { history: merged, tokens: used, dropped: turns.length - picked.length };
 }
 
-export function createBrain({ kb, llm, memory, cache, logger }) {
+export function createBrain({ kb, llm, memory, cache, logger, availability = null }) {
   const log = logger?.child({ component: 'brain' });
 
   // These blocks sit inside the *user* message, where "me/my" naturally reads as the
@@ -210,6 +211,19 @@ export function createBrain({ kb, llm, memory, cache, logger }) {
           place: guessLocation(text) || guessLocationFromContext(theirMessages.slice(-3), { timeZone: tz }),
           timeZone: tz,
         });
+        // The asked time is taken, blocked, outside working hours or past: say it is not available and offer free slots.
+        // (A time that only overlaps another request that is still waiting is accepted: the owner decides and is told.)
+        if (availability && hit && !hit.allDay) {
+          const av = await availability.assess(hit.dueAt).catch((err) => {
+            log?.warn('Availability check failed; treating the time as free', { err });
+            return null;
+          });
+          if (av && !av.ok) {
+            const free = await availability.freeSlots({ count: 4, perDay: 2 }).catch(() => []);
+            ack = slotTakenAck({ code: lang.code, name: contactName, owner: settings.ownerName, dueAt: hit.dueAt, allDay: false, timeZone: tz, slots: slotsText(free, tz, ['hi', 'mr', 'gu'].includes(lang.code) ? lang.code : 'en') });
+            ackIntent = 'meeting_unavailable';
+          }
+        }
       } else if (isPassOnRequest(text, { ownerNames: ownerAliasList(settings) })) {
         // "remind him", "tell Sumit …", "unhe bol dena": noted and passed on, no promise made
         ack = passOnAck({ code: lang.code, name: contactName, owner: settings.ownerName });

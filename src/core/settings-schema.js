@@ -80,6 +80,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
   agendaConfirm: true, // confirming/declining an appointment in the console also messages the contact
   agendaCard: true, // …and the confirmation carries a generated invitation card (image)
   timezone: 'Asia/Kolkata', // IANA zone used to read "tomorrow at 5pm"
+  // Availability: meetings are only offered/confirmed inside these hours and never on top of another confirmed meeting.
+  workStart: '09:00', // local time (settings.timezone), HH:MM
+  workEnd: '21:00',
+  workDays: 'mon,tue,wed,thu,fri,sat,sun', // days meetings can happen
+  meetingMinutes: 60, // how long a meeting is assumed to last
+  meetingBufferMinutes: 15, // gap kept before and after every confirmed meeting
+  enforceAvailability: true, // tell people a taken/blocked/out-of-hours time is unavailable (with free slots) and warn before double-booking
   persona: '', // empty = built-in DEFAULT_PERSONA (keeps getting improvements on updates)
 });
 
@@ -129,6 +136,15 @@ const RULES = {
   agendaConfirm: bool,
   agendaCard: bool,
   timezone: (v) => (typeof v === 'string' && isTimeZone(v.trim()) ? v.trim() : undefined),
+  workStart: (v) => (typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v.trim()) ? v.trim() : undefined),
+  workEnd: (v) => (typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v.trim()) ? v.trim() : undefined),
+  workDays: (v) => {
+    const days = typeof v === 'string' ? v.toLowerCase().split(/[\s,]+/).filter(Boolean) : null;
+    return days && days.length && days.every((d) => ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].includes(d)) ? [...new Set(days)].join(',') : undefined;
+  },
+  meetingMinutes: (v) => intIn(v, 5, 480),
+  meetingBufferMinutes: (v) => intIn(v, 0, 240),
+  enforceAvailability: bool,
   persona: (v) => (typeof v === 'string' && !v.trim() ? '' : text(20, 8000)(v)),
 };
 

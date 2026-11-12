@@ -18,6 +18,7 @@ import { KeyStore } from '../llm/key-store.js';
 import { GroqClient } from '../llm/groq.js';
 import { RoutedLlm } from '../llm/router.js';
 import { createBrain } from '../brain/pipeline.js';
+import { createAvailability } from '../brain/availability.js';
 import { looksLikeCommitmentInContext, sameItem } from '../brain/agenda.js';
 
 const log = logger.child({ component: 'worker' });
@@ -69,7 +70,8 @@ const llmGated = new RoutedLlm({
   localReady: () => modelState.ready,
   logger: log,
 });
-const brain = createBrain({ kb, llm: llmGated, memory, cache: createRedisAnswerCache(redis), logger: log });
+const availability = createAvailability({ repo, getSettings: () => settings.get() }); // a requested time that is taken/blocked/out of hours gets "not available + free slots"
+const brain = createBrain({ kb, llm: llmGated, memory, cache: createRedisAnswerCache(redis), logger: log, availability });
 
 let modelState = { model: settings.get().model, ready: false, error: null };
 async function prepareModel(model) {
@@ -186,6 +188,7 @@ async function handleJob(job) {
   const s = settings.get();
   inFlight++;
   let superseded = false;
+  let doneIntent = null;
   try {
     const longTerm = s.memoryEnabled ? await repo.getMemory(job.chatId).catch(() => null) : null;
     const stream = brain.respond({
@@ -201,6 +204,7 @@ async function handleJob(job) {
         co.markEmitted(job.chatId);
         await out({ type: 'chunk', index: ev.index, text: ev.text, meta: ev.meta });
       } else if (ev.type === 'done') {
+        doneIntent = ev.meta.intent;
         lastReply = { at: Date.now(), latencyMs: ev.meta.latencyMs, firstChunkMs: ev.meta.firstChunkMs, tokensPerSec: ev.meta.tokensPerSec ?? null, cached: !!ev.meta.cached, model: ev.meta.model };
         await out({ type: 'done', meta: ev.meta });
       }
@@ -233,7 +237,8 @@ async function handleJob(job) {
   // "let's meet tomorrow at 5" → Agenda (off the hot path, like memory folds). The request and its
   // details often come as separate messages ("I want to meet" … "tomorrow at six near the office").
   const earlierUserTexts = turnsNow.filter((t) => t.role === 'user').map((t) => t.content).slice(0, -1);
-  if (s.agendaEnabled && looksLikeCommitmentInContext(text, earlierUserTexts)) agendaQueue.set(job.chatId, { text, contactName: job.contactName || null, at: Date.now() });
+  // (A request for a time that is not available is not filed: the person was asked to pick a free slot, and that message will be.)
+  if (s.agendaEnabled && doneIntent !== 'meeting_unavailable' && looksLikeCommitmentInContext(text, earlierUserTexts)) agendaQueue.set(job.chatId, { text, contactName: job.contactName || null, at: Date.now() });
 }
 
 // ---- Agenda: appointments / to-dos spotted in chats ----

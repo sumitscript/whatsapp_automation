@@ -32,6 +32,8 @@ const TEXT = {
     passOn: "Noted {name}! I can't act on this myself, so I'll pass it on to the real {owner}. {owner} will see it soon ✅",
     ask: "Noted {name}! Which day, time and place did you have in mind? I'll pass it to the real {owner} to confirm.",
     askTime: "Noted {name}! {what}: {when}{place}\nWhat time works for you? I'll pass it to the real {owner} to confirm.",
+    busy: "Sorry {name}, {owner} isn't available then ({when}).\nFree slots: {slots}\nReply with one that suits you, or suggest another time.",
+    busyNone: "Sorry {name}, {owner} isn't available then ({when}). Please suggest another time.",
     confirmHead: '✅ Confirmed, {name}! {owner} has accepted: {title}',
     updatedHead: '🔁 Updated, {name}! {owner} has confirmed the new time: {title}',
     confirmTail: 'See you then 🙂',
@@ -42,6 +44,8 @@ const TEXT = {
     passOn: 'Note kar liya {name}! Yeh baat asli {owner} tak pahuncha di jayegi. {owner} jald dekh lenge ✅',
     ask: 'Note kar liya {name}! Kis din, kitne baje aur kahan milna hai? Asli {owner} tak pahuncha diya jayega, {owner} confirm karenge.',
     askTime: 'Note kar liya {name}! {what}: {when}{place}\nKitne baje ka time theek rahega? Asli {owner} tak pahuncha diya jayega, {owner} confirm karenge.',
+    busy: 'Sorry {name}, {owner} us time free nahi hain ({when}).\nFree slots: {slots}\nIn mein se koi chun lo, ya koi aur time batao.',
+    busyNone: 'Sorry {name}, {owner} us time free nahi hain ({when}). Koi aur time batao.',
     confirmHead: '✅ Confirm ho gaya, {name}! {owner} ne haan kar di hai: {title}',
     updatedHead: '🔁 Update, {name}! {owner} ne naya time confirm kiya hai: {title}',
     confirmTail: 'Milte hain 🙂',
@@ -52,6 +56,8 @@ const TEXT = {
     passOn: 'नोट कर लिया {name}! यह बात असली {owner} तक पहुँचा दी जाएगी। {owner} जल्द देख लेंगे ✅',
     ask: 'नोट कर लिया {name}! किस दिन, कितने बजे और कहाँ मिलना है? असली {owner} तक पहुँचा दिया जाएगा, {owner} पुष्टि करेंगे।',
     askTime: 'नोट कर लिया {name}! {what}: {when}{place}\nकितने बजे का समय ठीक रहेगा? असली {owner} तक पहुँचा दिया जाएगा, {owner} पुष्टि करेंगे।',
+    busy: 'क्षमा करें {name}, {owner} उस समय उपलब्ध नहीं हैं ({when})।\nखाली समय: {slots}\nइनमें से कोई चुनिए या दूसरा समय बताइए।',
+    busyNone: 'क्षमा करें {name}, {owner} उस समय उपलब्ध नहीं हैं ({when})। कृपया दूसरा समय बताइए।',
     confirmHead: '✅ पक्का, {name}! {owner} ने मंज़ूरी दे दी है: {title}',
     updatedHead: '🔁 बदलाव, {name}! {owner} ने नया समय पक्का किया है: {title}',
     confirmTail: 'तब मिलते हैं 🙂',
@@ -62,6 +68,8 @@ const TEXT = {
     passOn: 'नोंदवून घेतले {name}! हे खऱ्या {owner} पर्यंत पोहोचवले जाईल. {owner} लवकरच पाहतील ✅',
     ask: 'नोंदवून घेतले {name}! कोणत्या दिवशी, किती वाजता आणि कुठे भेटायचे? खऱ्या {owner} पर्यंत पोहोचवले जाईल, {owner} कळवतील.',
     askTime: 'नोंदवून घेतले {name}! {what}: {when}{place}\nकिती वाजता सोयीचे आहे? खऱ्या {owner} पर्यंत पोहोचवले जाईल, {owner} कळवतील.',
+    busy: 'क्षमस्व {name}, {owner} त्या वेळी उपलब्ध नाहीत ({when}).\nमोकळ्या वेळा: {slots}\nयापैकी एक निवडा किंवा दुसरी वेळ सांगा.',
+    busyNone: 'क्षमस्व {name}, {owner} त्या वेळी उपलब्ध नाहीत ({when}). कृपया दुसरी वेळ सांगा.',
     confirmHead: '✅ निश्चित, {name}! {owner} यांनी मान्य केले आहे: {title}',
     updatedHead: '🔁 बदल, {name}! {owner} यांनी नवीन वेळ निश्चित केली आहे: {title}',
     confirmTail: 'तेव्हा भेटू 🙂',
@@ -72,6 +80,8 @@ const TEXT = {
     passOn: 'નોંધી લીધું {name}! આ વાત સાચા {owner} સુધી પહોંચાડવામાં આવશે. {owner} જલ્દી જોશે ✅',
     ask: 'નોંધી લીધું {name}! કયા દિવસે, કેટલા વાગ્યે અને ક્યાં મળવું છે? સાચા {owner} સુધી પહોંચાડીશું, {owner} જણાવશે.',
     askTime: 'નોંધી લીધું {name}! {what}: {when}{place}\nકેટલા વાગ્યે અનુકૂળ રહેશે? સાચા {owner} સુધી પહોંચાડીશું, {owner} જણાવશે.',
+    busy: 'માફ કરજો {name}, {owner} તે સમયે ઉપલબ્ધ નથી ({when}).\nખાલી સમય: {slots}\nઆમાંથી પસંદ કરો અથવા બીજો સમય જણાવો.',
+    busyNone: 'માફ કરજો {name}, {owner} તે સમયે ઉપલબ્ધ નથી ({when}). કૃપા કરીને બીજો સમય જણાવો.',
     confirmHead: '✅ પાક્કું, {name}! {owner} એ મંજૂરી આપી છે: {title}',
     updatedHead: '🔁 ફેરફાર, {name}! {owner} એ નવો સમય પાક્કો કર્યો છે: {title}',
     confirmTail: 'ત્યારે મળીએ 🙂',
@@ -119,6 +129,15 @@ export function meetingAck(p) {
   return fill(TEXT[fam].ask, v);
 }
 
+/**
+ * The asked time is not free (a confirmed meeting, a block, outside working hours, or already past): say so without saying
+ * why, and offer free slots. `slots` is the text from slots.js slotsText() ('' when there are none).
+ */
+export function slotTakenAck(p) {
+  const { fam, v } = vars({ ...p, place: '' });
+  return fill(TEXT[fam][p.slots ? 'busy' : 'busyNone'], { ...v, slots: p.slots || '' });
+}
+
 /** Reply to "tell him / remind him / pass it on": noted and passed on, never agreeing or committing for the owner. */
 export function passOnAck(p) {
   const { fam, v } = vars(p);
@@ -136,9 +155,13 @@ export function confirmationText(p) {
   return lines.join('\n');
 }
 
+const SLOTS_LABEL = { en: 'Free slots:', hl: 'Free slots:', hi: 'खाली समय:', mr: 'मोकळ्या वेळा:', gu: 'ખાલી સમય:' };
+
+/** `slots` (from slots.js slotsText) adds the owner's free times so the person can pick another one. */
 export function declineText(p) {
   const { fam, v } = vars({ ...p, dueAt: p.dueAt });
-  return fill(TEXT[fam].decline, { ...v, when: v.when || { en: 'the time we discussed', hl: 'jo time baat hua tha', hi: 'जो समय तय हुआ था', mr: 'ठरलेली वेळ', gu: 'નક્કી થયેલો સમય' }[fam] });
+  const text = fill(TEXT[fam].decline, { ...v, when: v.when || { en: 'the time we discussed', hl: 'jo time baat hua tha', hi: 'जो समय तय हुआ था', mr: 'ठरलेली वेळ', gu: 'નક્કી થયેલો સમય' }[fam] });
+  return p.slots ? `${text}\n${SLOTS_LABEL[fam]} ${p.slots}` : text;
 }
 
 // ------------------------------------------------------------------- the card

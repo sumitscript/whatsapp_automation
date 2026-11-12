@@ -260,3 +260,12 @@ Concurrency: `GROQ_CONCURRENCY` (default 32) caps parallel Groq calls; the real 
 ## Invitation cards and the whatsapp-web.js media bug
 
 whatsapp-web.js 1.34.7 cannot send any image (error `Data passed to getter must include an id property`), which broke the invitation cards. The image build applies the upstream one-line fix (`scripts/patch-wwebjs.js`, wwebjs issue #201922) after `npm ci`; the build log line `[patch-wwebjs] patched…` shows it ran (a `WARNING` line means the library changed and the patch no longer fits). To check on the server, Settings → or `POST /api/wa/test-image` sends a small "Card test" picture to your own number and reports which sending method worked. Remove the patch step once a whatsapp-web.js release newer than 1.34.7 contains the fix.
+
+## Availability: no double-booking
+
+Settings → Agenda & alerts → **Availability** sets your working hours, working days, meeting length and the gap kept around meetings (defaults: 09:00-21:00, every day, 60 min, 15 min gap). Confirmed meetings and the time you block (Agenda → Availability: lunch, travel, leave) are "busy"; everything else inside working hours is a free slot, calculated on demand.
+
+- Someone asks for a taken, blocked or out-of-hours time: they get "not available" plus up to four free slots (they are not told why), and the request is not filed.
+- Two people ask for the same free time: both are accepted as pending and you are told on WhatsApp that they overlap. Confirming the first makes the second a clash.
+- Confirming a clashing request needs `force N` on WhatsApp ("confirm anyway" in the console). Declining one sends the person your free slots.
+- On WhatsApp, `slots` lists your next free times and what is booked. Turn it all off with "Check availability" in Settings.

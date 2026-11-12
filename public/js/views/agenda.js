@@ -63,6 +63,21 @@ function groupOf(item, now) {
   return { key: dayKey(d), label, order: startOfDay(d).getTime() };
 }
 
+// What a pending appointment clashes with (the server adds `clash` to such items).
+function clashNote(item) {
+  const c = item.clash;
+  if (!c) return '';
+  const bits = [
+    ...c.hard.map((h) => `clashes with #${h.id} (${h.title}), already confirmed`),
+    ...c.blocked.map((b) => `you marked this time busy (${b.label})`),
+    ...(c.reasons.includes('day_off') ? ['outside your working days'] : c.reasons.includes('outside_hours') ? ['outside your working hours'] : []),
+    ...(c.reasons.includes('past') ? ['that time has passed'] : []),
+    ...c.soft.map((s) => `#${s.id} (${s.contactName || s.title}) also asked for about this time`),
+  ];
+  if (!bits.length) return '';
+  return html`<p class="agenda-details" style="color: var(--warn)">⚠ ${bits.join(' · ')}</p>`;
+}
+
 function whenText(item) {
   const d = toDate(item.dueAt);
   if (!d) return '';
@@ -114,6 +129,21 @@ export async function mount(root, { hub }) {
           </label>
         </div>
         <div id="ag-list" aria-live="polite"></div>
+      </section>
+      <section class="card" id="ag-avail">
+        <div class="card-title-row"><h2 class="card-title">Availability</h2></div>
+        <p class="muted small" id="av-summary">Loading…</p>
+        <h3 class="section-title">Next free slots</h3>
+        <div id="av-slots" class="chip-group"></div>
+        <h3 class="section-title">Booked and blocked</h3>
+        <div id="av-busy"></div>
+        <form id="av-form" class="inline-form">
+          <input name="label" placeholder="Label, e.g. Lunch, Travel, Leave" aria-label="Block label" maxlength="80" />
+          <input name="from" type="datetime-local" aria-label="Busy from" required />
+          <input name="to" type="datetime-local" aria-label="Busy until" required />
+          <button class="btn btn-ghost" type="submit">${raw(icons.plus)} Block time</button>
+        </form>
+        <p class="muted small">Working hours and meeting length are in Settings. Confirmed meetings and these blocks are what make a time "not available".</p>
       </section>
     </div>`;
 
@@ -204,6 +234,7 @@ export async function mount(root, { hub }) {
           </div>
           ${raw(meta.length ? `<div class="agenda-meta">${meta.join('')}</div>` : '')}
           ${raw(who ? html`<div class="agenda-who small">${raw(icons.contacts)}${raw(who)}</div>` : '')}
+          ${raw(clashNote(item))}
           ${raw(item.details ? html`<p class="agenda-details">${item.details}</p>` : '')}
           ${raw(item.sourceMessage ? html`<blockquote class="agenda-quote muted small">${item.sourceMessage}</blockquote>` : '')}
           <div class="agenda-actions">${raw(actionsFor(item))}</div>
@@ -402,7 +433,21 @@ export async function mount(root, { hub }) {
     if (act === 'confirm') {
       const notify = notifyNow();
       let res = null;
-      await mutate(item.id, async () => { res = await api.agendaUpdate(item.id, { status: 'confirmed', notify }); }, 'Confirmed');
+      await mutate(item.id, async () => {
+        try {
+          res = await api.agendaUpdate(item.id, { status: 'confirmed', notify });
+        } catch (e) {
+          if (e.status !== 409 || !e.data?.clash) throw e;
+          const ok = await confirmDialog({
+            title: 'This time clashes',
+            message: `${e.data.clash.join(' ').replace(/\*/g, '')}${e.data.freeText ? ` Free times: ${e.data.freeText}.` : ''} Confirm anyway?`,
+            confirmText: 'Confirm anyway',
+            danger: true,
+          });
+          if (!ok) throw new Error('Not confirmed');
+          res = await api.agendaUpdate(item.id, { status: 'confirmed', notify, force: true });
+        }
+      }, 'Confirmed');
       if (notify && res) {
         if (res.notified) toast(res.card ? 'Contact notified with an invitation card' : 'Contact notified (the card could not be sent, so the text went alone)', res.card ? 'success' : 'info');
         else if (item.chatId) toast('Confirmed, but the contact could not be messaged (is WhatsApp connected?)', 'error');
@@ -441,6 +486,51 @@ export async function mount(root, { hub }) {
   $('#ag-add', root).addEventListener('click', () => openEditor(null));
 
   const reload = debounce(() => load({ quiet: true }), 400);
+  // ---------- availability panel ----------
+  const avSlots = $('#av-slots', root);
+  const avBusy = $('#av-busy', root);
+  const avTime = (iso, tz) => new Intl.DateTimeFormat('en-IN', { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(iso));
+  async function loadAvail() {
+    try {
+      const d = await api.availability();
+      const c = d.config;
+      $('#av-summary', root).textContent = c.enforceAvailability
+        ? `Meetings are taken ${c.workStart}–${c.workEnd} on ${c.workDays.split(',').map((x) => x[0].toUpperCase() + x.slice(1)).join(', ')} (${d.timezone}), ${c.meetingMinutes} min each with a ${c.meetingBufferMinutes} min gap.`
+        : 'Availability checking is off in Settings: every time is accepted.';
+      avSlots.innerHTML = d.slots.length ? d.slots.slice(0, 12).map((x) => html`<span class="chip">${avTime(x, d.timezone)}</span>`).join('') : html`<span class="muted small">No free slot in the next 14 days.</span>`;
+      const rows = [
+        ...d.meetings.map((m) => ({ at: m.startsAt, text: html`${avTime(m.startsAt, d.timezone)}: <strong>#${m.id}</strong> ${m.title}${m.contactName ? ` (${m.contactName})` : ''} <span class="badge ${m.status === 'confirmed' ? 'badge-ok' : 'badge-warn'}">${m.status === 'confirmed' ? 'Confirmed' : 'Waiting'}</span>` })),
+        ...d.blocks.map((b) => ({ at: b.startsAt, text: html`${avTime(b.startsAt, d.timezone)} to ${avTime(b.endsAt, d.timezone)}: <strong>${b.label}</strong> <button class="btn btn-ghost btn-sm agenda-del" data-block="${b.id}">Remove</button>` })),
+      ].sort((a, b) => new Date(a.at) - new Date(b.at));
+      avBusy.innerHTML = rows.length ? html`<ul class="plain-list">${raw(rows.map((r) => html`<li class="small">${raw(r.text)}</li>`).join(''))}</ul>` : html`<p class="muted small">Nothing booked yet.</p>`;
+    } catch (e) {
+      $('#av-summary', root).textContent = `Could not load availability: ${e.message}`;
+    }
+  }
+  $('#av-form', root).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api.addBlock({ label: f.label.value.trim() || 'Busy', startsAt: new Date(f.from.value).toISOString(), endsAt: new Date(f.to.value).toISOString() });
+      f.reset();
+      toast('Time blocked', 'success');
+      await loadAvail();
+    } catch (ex) {
+      toast(ex.message || 'Could not block that time', 'error');
+    }
+  });
+  avBusy.addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-block]');
+    if (!b) return;
+    try {
+      await api.deleteBlock(b.dataset.block);
+      await loadAvail();
+    } catch (ex) {
+      toast(ex.message, 'error');
+    }
+  });
+  loadAvail();
+
   const off = hub.on('agenda:update', reload);
 
   await load();

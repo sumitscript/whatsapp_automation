@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ownerAsk, ownerHelp, ownerNotice, ownerPendingList, ownerResultLine, parseOwnerCommand, resolveDecision } from '../src/brain/owner-commands.js';
+import { ownerAsk, ownerHelp, ownerNotice, ownerPendingList, ownerResultLine, ownerSlotsText, parseOwnerCommand, resolveDecision } from '../src/brain/owner-commands.js';
 import { invitationData, invitationHtml } from '../src/brain/invite.js';
 
-const decide = (action, ids = null, all = false) => ({ type: 'decide', action, ids, all });
+const decide = (action, ids = null, all = false, force = false) => ({ type: 'decide', action, ids, all, force });
 
 test('the owner can answer with a number and a word, in either order, in English, Hinglish, Hindi or Gujarati', () => {
   assert.deepEqual(parseOwnerCommand('ok 12'), decide('confirm', [12]));
@@ -108,4 +108,28 @@ test('any agenda item gets a card: a to-do reads TASK and Handled by, and works 
   const meet = invitationData({ ...todo, id: 22, kind: 'appointment', dueAt: '2026-11-11T00:30:00Z' }, settings, { now });
   assert.equal(meet.kicker, 'INVITATION');
   assert.match(invitationHtml(invitationData({ ...todo, dueAt: '2026-11-14T10:00:00Z' }, settings, { code: 'hi', now })), />कार्य</);
+});
+
+test('force and slots commands', () => {
+  assert.deepEqual(parseOwnerCommand('force 7'), decide('confirm', [7], false, true));
+  assert.deepEqual(parseOwnerCommand('ok 7 anyway'), decide('confirm', [7], false, true));
+  assert.deepEqual(parseOwnerCommand('Override #3'), decide('confirm', [3], false, true));
+  assert.equal(parseOwnerCommand('no 7 force'), null, 'forcing a decline makes no sense');
+  for (const t of ['slots', 'free', 'Availability', 'free slots']) assert.deepEqual(parseOwnerCommand(t), { type: 'slots' }, t);
+});
+
+test('the notice flags a clash and offers force; a blocked confirmation explains itself', () => {
+  const it = item(8);
+  const clash = ['⚠️ Clashes with *#4* (Meet Mehul) already confirmed for Fri, 13 Nov, 10:00 am.', 'Free: Fri, 13 Nov: 11:30 am'];
+  const n = ownerNotice(it, { timeZone: 'Asia/Kolkata', clash, blocking: true });
+  assert.match(n, /Clashes with \*#4\*/);
+  assert.match(n, /force 8/);
+  assert.match(n, /slots/);
+  assert.doesNotMatch(ownerNotice(it, { timeZone: 'Asia/Kolkata' }), /force/, 'no clash, no force hint');
+  const line = ownerResultLine({ item: it, action: 'confirm', clash, freeText: 'Fri, 13 Nov: 11:30 am' });
+  assert.match(line, /#8 not confirmed/);
+  assert.match(line, /Free: Fri, 13 Nov: 11:30 am/);
+  assert.match(line, /force 8/);
+  assert.match(ownerHelp(), /force 12/);
+  assert.match(ownerSlotsText({ slotsLine: 'Fri, 13 Nov: 11:30 am', meetings: [{ id: 4, title: 'Meet Mehul', contactName: 'Mehul', startsAt: '2026-11-13T04:30:00Z', status: 'confirmed' }], timeZone: 'Asia/Kolkata' }), /free times:[\s\S]*11:30 am[\s\S]*Booked:[\s\S]*Meet Mehul/);
 });

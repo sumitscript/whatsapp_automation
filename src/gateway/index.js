@@ -19,6 +19,7 @@ import { GroqClient } from '../llm/groq.js';
 import { RoutedLlm } from '../llm/router.js';
 import { Semaphore } from '../core/util.js';
 import { createBrain } from '../brain/pipeline.js';
+import { createAvailability } from '../brain/availability.js';
 import { WhatsAppManager } from './whatsapp.js';
 import { Inbox } from './inbox.js';
 import { SessionManager } from './sessions.js';
@@ -65,16 +66,17 @@ const router = new RoutedLlm({
   gates: { ollama: new Semaphore(config.ollama.concurrency), groq: new Semaphore(config.groq.concurrency) },
   logger: log,
 });
-const brain = createBrain({ kb, llm: router, memory, cache: createRedisAnswerCache(redis), logger: log });
+const availability = createAvailability({ repo, getSettings: () => settings.get() });
+const brain = createBrain({ kb, llm: router, memory, cache: createRedisAnswerCache(redis), logger: log, availability });
 const bus = await createBus({ logger: log, redisFactory: createRedis });
 
 const wa = new WhatsAppManager({ ...config.wa, logger: log });
 const hub = { emit: () => {} }; // replaced once Socket.IO is up
 const sessions = new SessionManager({ repo, settings, logger: log });
 sessions.startSweeper(); // ends idle sessions (sessionIdleMinutes)
-const inbox = new Inbox({ wa, repo, redis, bus, settings, memory, sessions, hub, logger: log });
+const inbox = new Inbox({ wa, repo, redis, bus, settings, memory, sessions, hub, availability, logger: log });
 
-const app = createApp({ auth, repo, redis, wa, inbox, settings, kb, llm, brain, memory, hub, groq: { pool: groqPool, client: groq, store: keyStore, router }, logger: log });
+const app = createApp({ auth, repo, redis, wa, inbox, settings, kb, llm, brain, memory, hub, availability, groq: { pool: groqPool, client: groq, store: keyStore, router }, logger: log });
 const server = http.createServer(app);
 const realtime = await createRealtime(server, { auth, wa, subscriber: sub, logger: log });
 hub.emit = realtime.emit;

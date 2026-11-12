@@ -942,3 +942,6 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { box-shadow: 
 @media (prefers-reduced-motion: reduce) {
   .agenda-item, .agenda-tile-link { transition: none; }
 }
+
+/* Availability panel (Agenda) */
+.plain-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 8px; }

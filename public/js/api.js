@@ -111,6 +111,9 @@ export const api = {
   agendaCreate: (body) => request('POST', '/api/agenda', body),
   agendaUpdate: (id, patch) => request('PATCH', `/api/agenda/${enc(id)}`, patch),
   agendaDelete: (id) => request('DELETE', `/api/agenda/${enc(id)}`),
+  availability: () => request('GET', '/api/availability'),
+  addBlock: (body) => request('POST', '/api/availability/blocks', body),
+  deleteBlock: (id) => request('DELETE', `/api/availability/blocks/${enc(id)}`),
   agendaSendCard: (id) => request('POST', `/api/agenda/${enc(id)}/send-card`),
 
   // ops

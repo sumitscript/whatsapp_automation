@@ -11,7 +11,8 @@ import { renderTemplate } from '../core/settings-schema.js';
 import { encryptSecret, maskKey } from '../core/secrets.js';
 import { GroqClient } from '../llm/groq.js';
 import { isGroqKeyFormat } from '../llm/key-store.js';
-import { localParts, looksLikeCommitmentInContext, sanitizeAgendaInput, summarizeAgenda, zonedToUtc } from '../brain/agenda.js';
+import { assess as assessSlot, clashLines, slotsText } from '../brain/slots.js';
+import { formatWhen, localParts, looksLikeCommitmentInContext, sanitizeAgendaInput, summarizeAgenda, zonedToUtc } from '../brain/agenda.js';
 
 const CHAT_ID = /^[\w.\-:@]{3,120}$/;
 const KB_FILE = /^[\w\-]{1,80}\.(md|txt)$/;
@@ -19,7 +20,7 @@ const KB_FILE = /^[\w\-]{1,80}\.(md|txt)$/;
 const httpError = (status, message) => Object.assign(new Error(message), { status });
 
 export function createApp(deps) {
-  const { auth, repo, redis, wa, inbox, settings, kb, llm, brain, memory, hub, logger } = deps;
+  const { auth, repo, redis, wa, inbox, settings, kb, llm, brain, memory, hub, availability, logger } = deps;
   const log = logger.child({ component: 'http' });
   const app = express();
   app.disable('x-powered-by');
@@ -375,7 +376,23 @@ export function createApp(deps) {
     const view = ['review', 'open', 'done', 'all'].includes(req.query.status) ? req.query.status : 'all';
     const kind = ['appointment', 'todo'].includes(req.query.kind) ? req.query.kind : undefined;
     const [items, summary] = await Promise.all([repo.listAgenda({ view, kind, limit: Number(req.query.limit) || 300 }), agendaSummary()]);
-    res.json({ items, summary, timezone: agendaTz() });
+    // Pending appointments that land on a confirmed meeting, a block or outside working hours carry a `clash` the console shows.
+    let shown = items;
+    if (availability) {
+      try {
+        const snap = await availability.snapshot();
+        if (snap.cfg.enforce) {
+          shown = items.map((it) => {
+            if (it.kind !== 'appointment' || it.status !== 'pending' || !it.dueAt || it.allDay) return it;
+            const av = assessSlot(it.dueAt, { ...snap, ignoreId: it.id });
+            return av.ok && !av.soft.length ? it : { ...it, clash: { ok: av.ok, reasons: av.reasons, hard: av.hard, soft: av.soft, blocked: av.blocked } };
+          });
+        }
+      } catch (err) {
+        log.warn('Could not check availability for the agenda list', { err });
+      }
+    }
+    res.json({ items: shown, summary, timezone: agendaTz() });
   });
   api.post('/agenda', async (req, res) => {
     const { value, errors } = sanitizeAgendaInput(req.body);
@@ -392,6 +409,23 @@ export function createApp(deps) {
     if (errors.length) throw httpError(400, errors.join('; '));
     const before = await repo.getAgendaItem(id);
     if (!before) throw httpError(404, 'Agenda item not found');
+    // Never double-book by accident: confirming an appointment that clashes (a confirmed meeting, a block, outside working hours)
+    // answers 409 with what it clashes with and free times; the console asks and repeats the request with force:true.
+    const confirming = value.status === 'confirmed' && before.status !== 'confirmed';
+    const finalDue = value.dueAt !== undefined ? value.dueAt : before.dueAt;
+    const finalAllDay = value.allDay ?? before.allDay;
+    if (confirming && req.body?.force !== true && availability && (value.kind ?? before.kind) === 'appointment' && finalDue && !finalAllDay) {
+      const av = await availability.assess(finalDue, { ignoreId: id });
+      if (!av.ok) {
+        const free = await availability.freeSlots({ count: 4, perDay: 2 });
+        return res.status(409).json({
+          error: 'This time clashes with something else',
+          clash: clashLines(av, { timeZone: agendaTz(), formatWhen }),
+          freeText: slotsText(free, agendaTz()),
+          free: free.map((d) => d.toISOString()),
+        });
+      }
+    }
     const item = await repo.updateAgendaItem(id, normalizeAllDay(value));
     let notified = false;
     let card = false;
@@ -430,6 +464,39 @@ export function createApp(deps) {
     if (!item.chatId) throw httpError(400, 'Only items linked to a chat can be sent to the contact');
     await inbox.sendInvitation(item);
     audit(req, 'agenda.send-card', { id });
+    res.json({ ok: true });
+  });
+  // ---------- availability: working hours, free slots, the owner's busy blocks ----------
+  api.get('/availability', async (_req, res) => {
+    if (!availability) throw httpError(404, 'Availability is not enabled');
+    const o = await availability.overview({ days: 14, count: 24, perDay: 4 });
+    const s = settings.get();
+    res.json({
+      timezone: agendaTz(),
+      config: { workStart: s.workStart, workEnd: s.workEnd, workDays: s.workDays, meetingMinutes: s.meetingMinutes, meetingBufferMinutes: s.meetingBufferMinutes, enforceAvailability: s.enforceAvailability },
+      slots: o.slots.map((d) => d.toISOString()),
+      meetings: o.meetings,
+      blocks: o.blocks,
+    });
+  });
+  api.post('/availability/blocks', async (req, res) => {
+    const startsAt = new Date(req.body?.startsAt);
+    const endsAt = new Date(req.body?.endsAt);
+    const label = String(req.body?.label || 'Busy').trim().slice(0, 80) || 'Busy';
+    if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) throw httpError(400, 'startsAt and endsAt must be dates');
+    if (endsAt <= startsAt) throw httpError(400, 'The end must be after the start');
+    if (endsAt - startsAt > 90 * 86_400_000) throw httpError(400, 'A block can be at most 90 days long');
+    const block = await repo.addTimeBlock({ startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), label });
+    audit(req, 'availability.block.add', { id: block.id });
+    hub.emit('agenda:update', { block: block.id });
+    res.json({ block });
+  });
+  api.delete('/availability/blocks/:id', async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) throw httpError(400, 'Invalid id');
+    if (!(await repo.deleteTimeBlock(id))) throw httpError(404, 'Block not found');
+    audit(req, 'availability.block.delete', { id });
+    hub.emit('agenda:update', { block: id });
     res.json({ ok: true });
   });
   api.delete('/agenda/:id', async (req, res) => {

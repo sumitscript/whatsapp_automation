@@ -343,6 +343,22 @@ export function createRepo(pool) {
       return (await q('DELETE FROM agenda_items WHERE id = $1', [id])).rowCount > 0;
     },
 
+    // ---------- availability: periods the owner is busy for reasons other than meetings ----------
+    async listTimeBlocks({ from = null, limit = 500 } = {}) {
+      const { rows } = from
+        ? await q('SELECT * FROM time_blocks WHERE ends_at > $1 ORDER BY starts_at LIMIT $2', [from, Math.min(Number(limit) || 500, 2000)])
+        : await q('SELECT * FROM time_blocks ORDER BY starts_at DESC LIMIT $1', [Math.min(Number(limit) || 500, 2000)]);
+      return rows.map((r) => ({ id: Number(r.id), startsAt: r.starts_at, endsAt: r.ends_at, label: r.label, createdAt: r.created_at }));
+    },
+    async addTimeBlock({ startsAt, endsAt, label }) {
+      const { rows } = await q('INSERT INTO time_blocks (starts_at, ends_at, label) VALUES ($1,$2,$3) RETURNING *', [startsAt, endsAt, label || 'Busy']);
+      const r = rows[0];
+      return { id: Number(r.id), startsAt: r.starts_at, endsAt: r.ends_at, label: r.label, createdAt: r.created_at };
+    },
+    async deleteTimeBlock(id) {
+      return (await q('DELETE FROM time_blocks WHERE id = $1', [id])).rowCount > 0;
+    },
+
     // ---------- LLM provider keys (encrypted at rest) ----------
     async listLlmKeys(provider = 'groq') {
       const { rows } = await q('SELECT id, label, key_enc, hint, created_at FROM llm_keys WHERE provider = $1 ORDER BY id', [provider]);
