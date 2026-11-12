@@ -94,6 +94,7 @@ export const api = {
   groqModels: () => request('GET', '/api/llm/groq/models'),
   groqAddKey: (label, key) => request('POST', '/api/llm/groq/keys', { label, key }),
   groqDeleteKey: (id) => request('DELETE', `/api/llm/groq/keys/${enc(id)}`),
+  groqMoveKey: (id, dir) => request('POST', `/api/llm/groq/keys/${enc(id)}/move`, { dir }),
   groqTest: (id) => request('POST', '/api/llm/groq/test', { id }),
   llmStatus: () => request('GET', '/api/llm/status'),
   pullModel: (name) => request('POST', '/api/models/pull', { name }),

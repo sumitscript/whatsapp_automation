@@ -44,11 +44,11 @@ test('usage is counted per key and per day (in the owner\'s timezone) and surviv
   await mk().record('db:1', { calls: 10, tokens: 16_260 });
   now = new Date('2026-11-12T08:30:00Z');
   const s = await mk().summary(['db:1', 'db:2', 'db:3']);
-  assert.deepEqual(s['db:1'].today, { calls: 2, ok: 1, tokens: 1040, limited: 1, errors: 0 });
+  assert.deepEqual({ ...s['db:1'].today, models: undefined }, { calls: 2, ok: 1, tokens: 1040, limited: 1, errors: 0, models: undefined });
   assert.equal(s['db:1'].d7.calls, 12);
   assert.equal(s['db:1'].d30.tokens, 17_300);
   assert.equal(s['db:2'].today.calls, 3);
-  assert.deepEqual(s['db:3'].today, { calls: 0, ok: 0, tokens: 0, limited: 0, errors: 0 }, 'a key never used reads zero');
+  assert.deepEqual({ ...s['db:3'].today, models: undefined }, { calls: 0, ok: 0, tokens: 0, limited: 0, errors: 0, models: undefined }, 'a key never used reads zero');
   assert.ok([...redis.ttl.values()].every((t) => t >= 40 * 86_400), 'counters expire on their own');
 });
 
@@ -65,6 +65,7 @@ test('the key pool reports calls, finished replies with tokens, rate limits and 
   const events = [];
   const pool = new KeyPool();
   pool.usageSink = (id, d) => events.push([id, d]);
+  pool.setStrategy('spread'); // accounts take turns, so the second pick is account b
   pool.setKeys([{ id: 'a', label: 'a', secret: 'gsk_secret_a_xxxxxxxxxxxx' }, { id: 'b', label: 'b', secret: 'gsk_secret_b_xxxxxxxxxxxx' }]);
   pool.pick(); // a
   pool.success('a', { remainingTokens: 5000 }); // response headers only: not a finished reply
@@ -74,10 +75,10 @@ test('the key pool reports calls, finished replies with tokens, rate limits and 
   pool.transient('a');
   pool.authFailed('b');
   assert.deepEqual(events, [
-    ['a', { calls: 1 }],
-    ['a', { ok: 1, tokens: 1040 }],
-    ['b', { calls: 1 }],
-    ['b', { limited: 1 }],
+    ['a', { calls: 1, model: '*' }],
+    ['a', { ok: 1, tokens: 1040, model: '*' }],
+    ['b', { calls: 1, model: '*' }],
+    ['b', { limited: 1, model: '*' }],
     ['a', { errors: 1 }],
     ['b', { errors: 1 }],
   ]);
@@ -92,7 +93,7 @@ test('a Groq reply records its tokens even when only prompt/completion counts ar
   pool.setKeys([{ id: 'a', label: 'a', secret: 'gsk_secret_a_xxxxxxxxxxxx' }]);
   const g = new GroqClient({ pool, baseUrl: 'http://x', fetchImpl });
   for await (const ev of g.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] })) void ev;
-  assert.deepEqual(events.filter(([, d]) => d.ok), [['a', { ok: 1, tokens: 1020 }]]);
+  assert.deepEqual(events.filter(([, d]) => d.ok), [['a', { ok: 1, tokens: 1020, model: 'm' }]]);
 });
 
 // ------------------------------------------------------------------ language instructions
@@ -140,4 +141,18 @@ test('asking the twin to fix a date / book a slot is a meeting request, never ag
 test('a booking request does not lend its words as a place', () => {
   for (const x of ['Fix a date for me on next monday', 'book a slot for us on friday', 'can you fix a time for me', 'Tell him hi for me']) assert.equal(guessLocation(x), null, x);
   assert.equal(guessLocation('fix a date on friday at the railway station'), 'Railway station');
+});
+
+test('usage is also kept per model, because the limits are per model', async () => {
+  const redis = fakeRedis();
+  const now = new Date('2026-11-12T08:00:00Z');
+  const u = new UsageStore({ redis, keyFor: (k, d) => k + ':' + d, getTimezone: () => 'Asia/Kolkata', now: () => now });
+  await u.record('db:1', { calls: 1, model: 'openai/gpt-oss-120b' });
+  await u.record('db:1', { ok: 1, tokens: 1000, model: 'openai/gpt-oss-120b' });
+  await u.record('db:1', { calls: 1, model: 'openai/gpt-oss-20b' });
+  await u.record('db:1', { limited: 1, model: 'openai/gpt-oss-120b' });
+  const s = await u.summary(['db:1']);
+  assert.equal(s['db:1'].today.calls, 2);
+  assert.equal(s['db:1'].today.limited, 1);
+  assert.deepEqual(s['db:1'].today.models, { 'openai/gpt-oss-120b': { calls: 1, tokens: 1000 }, 'openai/gpt-oss-20b': { calls: 1, tokens: 0 } });
 });

@@ -1,17 +1,24 @@
-// Chooses where each model call runs: Groq (several API keys, rotated) or the local Ollama model.
+// Chooses where each model call runs: Groq (several accounts, several models each) or the local Ollama model.
 //
-//   llmProvider = 'auto'    Groq whenever a key is usable; a rate-limited key is skipped instantly and the next key is
-//                           used; when every key is exhausted (or Groq is down, or no key was added) the local model
-//                           answers. Adding a key is all it takes: no other switch to flip.
+//   llmProvider = 'auto'    Groq whenever an (account, model) can serve; when every one is used up (or Groq is down, or no
+//                           key was added) the local model answers. Adding a key is all it takes.
 //   llmProvider = 'ollama'  every call runs locally (Groq is never contacted)
-//   llmProvider = 'groq'    Groq only: when no key can answer the call fails with GroqUnavailableError and the worker
+//   llmProvider = 'groq'    Groq only: when nothing can answer the call fails with GroqUnavailableError and the worker
 //                           sends the "on a short break" message (setting groqBusyMessage) instead of a reply.
+// Inside Groq the order is the owner's hierarchy (setting groqStrategy 'priority'): account 1 with its models in order
+// (groqModels), then account 2 with its own quota for the same models, then account 3… (see key-pool.js).
 // Background work (memory folds, agenda extraction) stays on the local model while it is ready so it never spends Groq
 // quota; in Groq-only mode with the local model not ready it uses Groq. Think-ahead is skipped on the Groq route.
 // Exposes the same surface the pipeline uses on an LLM client: numCtx, chat(), prefill(), reusesPrefix().
 import { GroqUnavailableError } from './groq.js';
 
 export const PROVIDERS = ['auto', 'ollama', 'groq'];
+
+/** "a, b c" or ['a','b'] → ['a','b'] */
+export function parseModelList(v) {
+  const list = Array.isArray(v) ? v : String(v ?? '').split(/[\s,]+/);
+  return [...new Set(list.map((m) => String(m).trim()).filter(Boolean))];
+}
 
 export class RoutedLlm {
   /**
@@ -30,11 +37,19 @@ export class RoutedLlm {
     return this.ollama.numCtx;
   }
 
-  /** Settings for one call: the request's own provider choice (playground, tests) wins over the live setting. */
+  /** Settings for one call: the request's own choice (playground, tests) wins over the live setting. */
   #settingsFor(req = {}) {
     const s = this.getSettings();
     const p = req.provider ?? s.llmProvider;
-    return { llmProvider: PROVIDERS.includes(p) ? p : 'auto', groqModel: req.groqModel ?? s.groqModel };
+    let models = req.groqModels ? parseModelList(req.groqModels) : req.groqModel ? [req.groqModel] : parseModelList(s.groqModels);
+    if (!models.length) models = s.groqModel ? [s.groqModel] : [];
+    return { llmProvider: PROVIDERS.includes(p) ? p : 'auto', groqModels: models, strategy: s.groqStrategy === 'spread' ? 'spread' : 'priority' };
+  }
+
+  /** Keep the pool's strategy in step with the live setting (cheap; called before every use). */
+  #sync(s) {
+    this.groq.pool.setStrategy?.(s.strategy);
+    this.groq.pool.setModels?.(s.groqModels);
   }
 
   /** Should this call try Groq at all? */
@@ -46,18 +61,20 @@ export class RoutedLlm {
     return s.llmProvider === 'groq' || this.groq.pool.size > 0;
   }
 
-  /** Is Groq selected (auto or Groq only) and at least one key ready right now? */
+  /** Is Groq selected (auto or Groq only) and at least one (account, model) ready right now? */
   groqUsable() {
-    const s = this.getSettings();
-    return s.llmProvider !== 'ollama' && this.groq.usable();
+    const s = this.#settingsFor();
+    this.#sync(s);
+    return s.llmProvider !== 'ollama' && this.groq.usable(s.groqModels);
   }
 
   /** Does a reply need the local model to be loaded (it will be, or may be, answered locally)? */
   needsLocal() {
-    const s = this.getSettings();
+    const s = this.#settingsFor();
     if (s.llmProvider === 'ollama') return true;
     if (s.llmProvider === 'groq') return false;
-    return !this.groq.usable(); // auto: local only when no Groq key can serve right now
+    this.#sync(s);
+    return !this.groq.usable(s.groqModels); // auto: local only when nothing on Groq can serve right now
   }
 
   /** Pre-reading a prompt only helps a local model that keeps a prefix cache. */
@@ -82,14 +99,15 @@ export class RoutedLlm {
     const s = this.#settingsFor(req);
     const priority = req.priority ?? (req.maxTokens > 450 ? 2 : 1);
     if (this.#wantsGroq(s, priority)) {
+      this.#sync(s);
       const strict = s.llmProvider === 'groq';
-      if (this.groq.usable()) {
+      if (this.groq.usable(s.groqModels)) {
         let started = false;
         try {
           await this.gates.groq.acquire({ priority, signal: req.signal });
           try {
-            yield { type: 'meta', provider: 'groq', model: s.groqModel };
-            for await (const ev of this.groq.chat({ ...req, model: s.groqModel })) {
+            yield { type: 'meta', provider: 'groq', model: s.groqModels[0] }; // corrected by the client once an account/model accepts
+            for await (const ev of this.groq.chat({ ...req, models: s.groqModels })) {
               if (ev.type === 'token') started = true;
               yield ev;
             }
@@ -104,9 +122,9 @@ export class RoutedLlm {
           this.#fellBack(err);
         }
       } else if (strict) {
-        return this.#busy(new GroqUnavailableError(this.groq.pool.size ? 'every Groq key is rate-limited right now' : 'no Groq key configured', { kind: this.groq.pool.size ? 'exhausted' : 'no_keys', retryAfterMs: this.groq.pool.nextAvailableMs() }));
+        return this.#busy(new GroqUnavailableError(this.groq.pool.size ? 'every Groq account is rate-limited right now' : 'no Groq key configured', { kind: this.groq.pool.size ? 'exhausted' : 'no_keys', retryAfterMs: this.groq.pool.nextAvailableMs(s.groqModels) }));
       } else {
-        this.#fellBack(new GroqUnavailableError('every Groq key is rate-limited right now', { kind: 'exhausted', retryAfterMs: this.groq.pool.nextAvailableMs() }));
+        this.#fellBack(new GroqUnavailableError('every Groq account is rate-limited right now', { kind: 'exhausted', retryAfterMs: this.groq.pool.nextAvailableMs(s.groqModels) }));
       }
     }
     yield { type: 'meta', provider: 'ollama', model: req.model };
@@ -134,14 +152,17 @@ export class RoutedLlm {
   }
 
   status() {
-    const s = this.getSettings();
+    const s = this.#settingsFor();
+    this.#sync(s);
     return {
       provider: s.llmProvider,
-      groqModel: s.groqModel,
-      groqReady: this.groq.usable(),
+      groqModel: s.groqModels[0] ?? null,
+      groqModels: s.groqModels,
+      strategy: s.strategy,
+      groqReady: this.groq.usable(s.groqModels),
       counters: { ...this.counters },
       lastFallback: this.lastFallback,
-      keys: this.groq.pool.status(),
+      keys: this.groq.pool.status(s.groqModels),
     };
   }
 }

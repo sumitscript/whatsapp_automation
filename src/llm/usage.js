@@ -22,12 +22,16 @@ export class UsageStore {
   }
 
   /** Add to today's counters. Fire and forget: usage numbers must never slow or break a reply. */
-  record(keyId, delta) {
+  record(keyId, { model, ...delta }) {
     const fields = Object.entries(delta).filter(([f, n]) => FIELDS.includes(f) && Number.isFinite(n) && n !== 0);
     if (!fields.length) return Promise.resolve();
     const key = this.keyFor(keyId, dayKey(this.now(), this.getTimezone()));
     const p = this.redis.pipeline();
-    for (const [f, n] of fields) p.hincrby(key, f, Math.round(n));
+    for (const [f, n] of fields) {
+      p.hincrby(key, f, Math.round(n));
+      // per model too (limits are per model, so is the usage worth knowing): fields "calls:<model>" / "tokens:<model>"
+      if (model && model !== '*' && (f === 'calls' || f === 'tokens')) p.hincrby(key, `${f}:${model}`, Math.round(n));
+    }
     p.expire(key, KEEP_DAYS * 86_400);
     return p.exec().catch((err) => this.onError(err));
   }
@@ -52,10 +56,15 @@ export class UsageStore {
         rows = [];
       }
       const sum = (n) => {
-        const acc = Object.fromEntries(FIELDS.map((f) => [f, 0]));
+        const acc = { ...Object.fromEntries(FIELDS.map((f) => [f, 0])), models: {} };
         rows.slice(0, n).forEach((r) => {
           const h = r && r[1];
-          if (h) for (const f of FIELDS) acc[f] += Number(h[f]) || 0;
+          if (!h) return;
+          for (const f of FIELDS) acc[f] += Number(h[f]) || 0;
+          for (const [field, v] of Object.entries(h)) {
+            const m = /^(calls|tokens):(.+)$/.exec(field);
+            if (m) (acc.models[m[2]] ??= { calls: 0, tokens: 0 })[m[1]] += Number(v) || 0;
+          }
         });
         return acc;
       };

@@ -117,7 +117,15 @@ export async function mount(root, { hub }) {
               <label class="radio-card"><input type="radio" name="llmProvider" value="ollama" /><span><strong>Local only</strong><small>Always the model on this server's CPU. Private, but slower. Groq is never used</small></span></label>
               <label class="radio-card"><input type="radio" name="llmProvider" value="groq" /><span><strong>Groq only</strong><small>Never the local model. When no Groq key can answer, people get the short-break message below</small></span></label>
             </div>
-            <label class="field"><span>Groq model</span><input name="groqModel" list="gq-models" placeholder="openai/gpt-oss-120b" autocomplete="off" /><datalist id="gq-models"></datalist></label>
+            <label class="field"><span>Models, best first <span class="muted small">(tried in this order inside every account; Groq's limits are per model)</span></span>
+              <input name="groqModels" list="gq-models" placeholder="openai/gpt-oss-120b, openai/gpt-oss-20b, qwen/qwen3.8-27b" autocomplete="off" /><datalist id="gq-models"></datalist>
+              <small class="muted">Up to 8, separated by commas. A model an account cannot use is skipped for that account.</small></label>
+            <fieldset class="field"><legend>Which account first?</legend>
+              <div class="radio-cards">
+                <label class="radio-card"><input type="radio" name="groqStrategy" value="priority" /><span><strong>Priority</strong><small>Account 1 with all its models first, then account 2, then 3… (top of the list below is first)</small></span></label>
+                <label class="radio-card"><input type="radio" name="groqStrategy" value="spread" /><span><strong>Spread</strong><small>Accounts take turns, so every account's quota is used evenly</small></span></label>
+              </div>
+            </fieldset>
             <label class="field"><span>Short-break message <span class="muted small">(sent in Groq-only mode when Groq cannot answer)</span></span>
               <textarea name="groqBusyMessage" rows="3" maxlength="1000"></textarea>
               <small class="muted">Placeholders: <code class="wa-inline">{name}</code> <code class="wa-inline">{persona}</code> <code class="wa-inline">{owner}</code>. Sent at most once every 5 minutes per chat.</small></label>
@@ -376,7 +384,8 @@ export async function mount(root, { hub }) {
     if (!d) return;
     if (!gqForm.contains(document.activeElement)) {
       Array.from(gqForm.elements.llmProvider).forEach((r) => (r.checked = r.value === d.provider));
-      gqForm.elements.groqModel.value = d.model || '';
+      gqForm.elements.groqModels.value = (d.models?.length ? d.models : [d.model]).filter(Boolean).join(', ');
+      Array.from(gqForm.elements.groqStrategy).forEach((r) => (r.checked = r.value === (d.strategy || 'priority')));
       if (gq.busyMessage != null) gqForm.elements.groqBusyMessage.value = gq.busyMessage;
     }
     const ready = d.keys.filter((k) => k.state === 'ready').length;
@@ -395,26 +404,33 @@ export async function mount(root, { hub }) {
       ? html` <div class="muted small">Last Groq problem (${new Date(lp.at).toLocaleTimeString()}): ${lp.reason}${/does not exist|access|404/i.test(lp.reason) ? ' Choose a model your key can use from the list in the model box.' : ''}</div>`
       : '';
     $('#gq-summary', root).insertAdjacentHTML('beforeend', problem);
-    const rows = d.keys.map((k) => {
-      const pill =
-        k.state === 'ready'
-          ? html`<span class="badge badge-ok">Ready</span>`
-          : k.state === 'cooling'
-            ? html`<span class="badge badge-warn">Rate-limited · ${cooldownText(k.cooldownMs)}</span>`
-            : html`<span class="badge badge-bad">Rejected</span>`;
+    const compact = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n));
+    const modelChip = (m) => {
+      const name = String(m.id).split('/').pop();
+      if (m.state === 'ready') return html`<span class="badge badge-ok" title="${m.id}">${name}</span>`;
+      if (m.gone) return html`<span class="badge badge-bad" title="${m.id}: ${m.lastError || ''}">${name} · not available</span>`;
+      if (m.state === 'cooling') return html`<span class="badge badge-warn" title="${m.id}: ${m.lastError || ''}">${name} · ${cooldownText(m.cooldownMs)}</span>`;
+      return html`<span class="badge badge-bad" title="${m.id}">${name} · off</span>`;
+    };
+    const consoleKeys = d.keys.filter((k) => k.source === 'console');
+    const rows = d.keys.map((k, i) => {
       // Counted in Redis by both the worker and the gateway, so it matches console.groq.com and survives restarts.
-      const compact = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n));
       const u = k.usage;
+      const perModel = u && u.today.models ? Object.entries(u.today.models).map(([m, v]) => `${m.split('/').pop()}: ${formatNumber(v.calls)} calls, ${compact(v.tokens)}`).join(' · ') : '';
       const used = u
-        ? html`Today: ${formatNumber(u.today.calls)} calls · ${compact(u.today.tokens)} tokens${u.today.limited ? ` · ${u.today.limited} rate-limited` : ''}<div>30 days: ${formatNumber(u.d30.calls)} calls · ${compact(u.d30.tokens)} tokens</div>`
+        ? html`Today: ${formatNumber(u.today.calls)} calls · ${compact(u.today.tokens)} tokens${u.today.limited ? ` · ${u.today.limited} rate-limited` : ''}${perModel ? html`<div>${perModel}</div>` : ''}<div>30 days: ${formatNumber(u.d30.calls)} calls · ${compact(u.d30.tokens)} tokens</div>`
         : html`<span>No usage recorded yet</span>`;
+      const ci = consoleKeys.findIndex((x) => x.id === k.id);
+      const move = k.source === 'console' ? html`<button class="btn btn-ghost btn-sm" data-act="up" data-id="${k.id}" ${ci <= 0 ? 'disabled' : ''} aria-label="Move up" title="Higher priority">↑</button><button class="btn btn-ghost btn-sm" data-act="down" data-id="${k.id}" ${ci < 0 || ci >= consoleKeys.length - 1 ? 'disabled' : ''} aria-label="Move down" title="Lower priority">↓</button> ` : '';
       const remove = k.source === 'console' ? html` <button class="btn btn-ghost btn-sm agenda-del" data-act="remove" data-id="${k.id}" data-label="${k.label}">Remove</button>` : '';
+      const state = k.state === 'disabled' ? html`<span class="badge badge-bad">Rejected by Groq</span>` : '';
+      const org = k.sameOrgAs ? html`<div class="small" style="color: var(--warn)">Same Groq organization as ${k.sameOrgAs}: they share limits, so this adds no extra capacity</div>` : k.org ? html`<div class="muted small">Organization ${k.org}</div>` : '';
       const why = k.lastError && k.state !== 'ready' ? html`<div class="muted small">${k.lastError}</div>` : '';
-      return html`<tr><td><strong>${k.label}</strong><div class="muted small">${k.hint} · ${k.source === 'env' ? 'server env' : 'console'}</div></td><td>${raw(pill)}${raw(why)}</td><td class="muted small">${raw(used)}</td><td class="actions"><button class="btn btn-ghost btn-sm" data-act="test" data-id="${k.id}">Test</button>${raw(remove)}</td></tr>`;
+      return html`<tr><td><strong>Account ${k.priority ?? i + 1}: ${k.label}</strong><div class="muted small">${k.hint} · ${k.source === 'env' ? 'server env' : 'console'}</div>${raw(org)}</td><td>${raw(state)}<div class="chip-group">${raw((k.models || []).map(modelChip).join(''))}</div>${raw(why)}</td><td class="muted small">${raw(used)}</td><td class="actions">${raw(move)}<button class="btn btn-ghost btn-sm" data-act="test" data-id="${k.id}">Test</button>${raw(remove)}</td></tr>`;
     });
     $('#gq-keys', root).innerHTML = rows.length
-      ? html`<table class="table"><thead><tr><th>Key</th><th>Status</th><th>Usage</th><th></th></tr></thead><tbody>${raw(rows.join(''))}</tbody></table>`
-      : html`<p class="muted small">No keys yet. Add your Groq API key below (you can add several).</p>`;
+      ? html`<table class="table"><thead><tr><th>Account (priority order)</th><th>Models</th><th>Usage</th><th></th></tr></thead><tbody>${raw(rows.join(''))}</tbody></table>`
+      : html`<p class="muted small">No keys yet. Add your Groq API key below (you can add several, one per Groq account).</p>`;
     if (d.unreadable) $('#gq-keys', root).insertAdjacentHTML('beforeend', html`<p class="muted small">${d.unreadable} saved key(s) cannot be read (the server secret changed). Add them again.</p>`);
   }
   async function loadGroq() {
@@ -437,7 +453,7 @@ export async function mount(root, { hub }) {
   }
   gqForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const body = { llmProvider: gqForm.elements.llmProvider.value, groqModel: gqForm.elements.groqModel.value.trim() || 'openai/gpt-oss-120b', groqBusyMessage: gqForm.elements.groqBusyMessage.value.trim() };
+    const body = { llmProvider: gqForm.elements.llmProvider.value, groqModels: gqForm.elements.groqModels.value.trim() || 'openai/gpt-oss-120b', groqStrategy: gqForm.elements.groqStrategy.value || 'priority', groqBusyMessage: gqForm.elements.groqBusyMessage.value.trim() };
     if (!body.groqBusyMessage) delete body.groqBusyMessage;
     try {
       await api.saveSettings(body);
@@ -473,6 +489,13 @@ export async function mount(root, { hub }) {
         toast(ex.message, 'error');
       } finally {
         b.disabled = false;
+      }
+    } else if (b.dataset.act === 'up' || b.dataset.act === 'down') {
+      try {
+        await api.groqMoveKey(String(id).replace(/^db:/, ''), b.dataset.act);
+        await loadGroq();
+      } catch (ex) {
+        toast(ex.message, 'error');
       }
     } else if (b.dataset.act === 'remove') {
       const ok = await confirmDialog({ title: 'Remove this key?', message: `“${b.dataset.label}” will be deleted from the server. Other keys keep working.`, confirmText: 'Remove', danger: true });

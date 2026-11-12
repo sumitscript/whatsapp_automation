@@ -269,3 +269,13 @@ Settings → Agenda & alerts → **Availability** sets your working hours, worki
 - Two people ask for the same free time: both are accepted as pending and you are told on WhatsApp that they overlap. Confirming the first makes the second a clash.
 - Confirming a clashing request needs `force N` on WhatsApp ("confirm anyway" in the console). Declining one sends the person your free slots.
 - On WhatsApp, `slots` lists your next free times and what is booked. Turn it all off with "Check availability" in Settings.
+
+## Groq: several accounts, several models
+
+Groq's limits are **per model and per organization**: running out of gpt-oss-120b does not use up gpt-oss-20b, and two API keys from the same Groq organization share one set of limits (a second key from the same organization adds no capacity; use keys from separate Groq accounts you own). The console shows when it detects two keys sharing an organization.
+
+Settings → AI provider:
+- **Models, best first**: the models tried inside every account, e.g. `openai/gpt-oss-120b, openai/gpt-oss-20b, qwen/qwen3.8-27b`.
+- **Priority**: account 1 (top of the key list) with all its models in order, then account 2 from the top of the list again, then account 3. When everything is used up, Auto falls back to the local model and Groq-only sends the short-break message.
+- **Spread**: accounts take turns so every account's quota is used evenly.
+- Use ↑/↓ on a key to change the account order. A model an account has no access to is skipped for that account (marked "not available").

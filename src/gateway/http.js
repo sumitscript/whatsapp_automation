@@ -252,15 +252,19 @@ export function createApp(deps) {
     const s = settings.get();
     let usage = {};
     try {
-      usage = await groqDeps.usage.summary(groqDeps.pool.status().map((k) => k.id));
+      usage = await groqDeps.usage.summary([...groqDeps.pool.keys.keys()]);
     } catch {
       /* the counters are a convenience: show the keys without them */
     }
+    // the router syncs the pool with the live model list/strategy, so the gateway's own view has the per-model states
+    const base = groqDeps.router.status();
     res.json({
       provider: s.llmProvider,
-      model: s.groqModel,
-      envKeys: groqDeps.pool.status().filter((k) => k.source === 'env').length,
-      keys: groqDeps.pool.status().map((k) => ({ ...k, ...(live.get(k.id) ? { ...live.get(k.id), label: k.label, hint: k.hint, source: k.source } : {}), usage: usage[k.id] || null })),
+      model: base.groqModel,
+      models: base.groqModels,
+      strategy: base.strategy,
+      envKeys: base.keys.filter((k) => k.source === 'env').length,
+      keys: base.keys.map((k) => ({ ...k, ...(live.get(k.id) ? { ...live.get(k.id), label: k.label, hint: k.hint, source: k.source } : {}), usage: usage[k.id] || null })),
       counters: worker?.counters ?? null,
       lastFallback: worker?.lastFallback ?? null,
       groqReady: worker?.groqReady ?? groqDeps.pool.hasAvailable(),
@@ -285,6 +289,16 @@ export function createApp(deps) {
     if (!Number.isInteger(id) || id < 1) throw httpError(400, 'Invalid id');
     if (!(await repo.deleteLlmKey(id))) throw httpError(404, 'Key not found (keys from the GROQ_API_KEYS environment variable are removed in the server .env)');
     audit(req, 'llm.key.delete', { id });
+    await keyChanged();
+    res.json({ ok: true });
+  });
+  // Account order is priority order: move a console key up (account 1 first) or down.
+  api.post('/llm/groq/keys/:id/move', async (req, res) => {
+    const id = Number(req.params.id);
+    const dir = req.body?.dir === 'up' ? 'up' : req.body?.dir === 'down' ? 'down' : null;
+    if (!Number.isInteger(id) || id < 1 || !dir) throw httpError(400, 'Invalid id or direction');
+    if (!(await repo.moveLlmKey(id, dir))) throw httpError(409, 'It cannot move further');
+    audit(req, 'llm.key.move', { id, dir });
     await keyChanged();
     res.json({ ok: true });
   });
@@ -571,7 +585,7 @@ export function createApp(deps) {
     }
     // Optional: try the hosted route from the playground without changing the live setting.
     if (req.body?.provider === 'groq' || req.body?.provider === 'ollama') s = { ...s, llmProvider: req.body.provider };
-    if (typeof req.body?.groqModel === 'string' && /^[\w.\-/:]{1,100}$/.test(req.body.groqModel)) s = { ...s, groqModel: req.body.groqModel };
+    if (typeof req.body?.groqModel === 'string' && /^[\w.\-/:]{1,100}$/.test(req.body.groqModel)) s = { ...s, groqModel: req.body.groqModel, groqModels: req.body.groqModel };
     return s;
   };
   const playgroundHistory = (req) =>

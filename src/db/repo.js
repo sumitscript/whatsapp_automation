@@ -361,12 +361,23 @@ export function createRepo(pool) {
 
     // ---------- LLM provider keys (encrypted at rest) ----------
     async listLlmKeys(provider = 'groq') {
-      const { rows } = await q('SELECT id, label, key_enc, hint, created_at FROM llm_keys WHERE provider = $1 ORDER BY id', [provider]);
+      const { rows } = await q('SELECT id, label, key_enc, hint, created_at FROM llm_keys WHERE provider = $1 ORDER BY COALESCE(position, id), id', [provider]);
       return rows.map((r) => ({ id: Number(r.id), label: r.label, keyEnc: r.key_enc, hint: r.hint, createdAt: r.created_at }));
     },
     async addLlmKey({ provider = 'groq', label, keyEnc, hint }) {
-      const { rows } = await q('INSERT INTO llm_keys (provider, label, key_enc, hint) VALUES ($1,$2,$3,$4) RETURNING id, label, hint, created_at', [provider, label, keyEnc, hint]);
+      const { rows } = await q('INSERT INTO llm_keys (provider, label, key_enc, hint, position) VALUES ($1,$2,$3,$4, COALESCE((SELECT MAX(position) FROM llm_keys WHERE provider = $1), 0) + 1) RETURNING id, label, hint, created_at', [provider, label, keyEnc, hint]);
       return { id: Number(rows[0].id), label: rows[0].label, hint: rows[0].hint, createdAt: rows[0].created_at };
+    },
+    /** Swap a key with its neighbour: dir 'up' = higher priority (account 1 is first). */
+    async moveLlmKey(id, dir, provider = 'groq') {
+      const keys = await this.listLlmKeys(provider);
+      const i = keys.findIndex((k) => k.id === id);
+      const j = dir === 'up' ? i - 1 : i + 1;
+      if (i < 0 || j < 0 || j >= keys.length) return false;
+      const order = keys.map((k) => k.id);
+      [order[i], order[j]] = [order[j], order[i]];
+      for (const [pos, kid] of order.entries()) await q('UPDATE llm_keys SET position = $1 WHERE id = $2', [pos + 1, kid]);
+      return true;
     },
     async deleteLlmKey(id) {
       return (await q('DELETE FROM llm_keys WHERE id = $1', [id])).rowCount > 0;

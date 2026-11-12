@@ -1,20 +1,22 @@
-// Groq (OpenAI-compatible) chat client with multi-key failover. Node built-ins only (global fetch).
+// Groq (OpenAI-compatible) chat client with per-account, per-model failover. Node built-ins only (global fetch).
 //
-// One logical request walks the key pool: a 429 on key A switches to key B in the same call with no pause,
-// an invalid key is skipped, a flaky network/5xx marks the key for a short rest. When every key is
-// unavailable the call throws GroqUnavailableError and the router falls back to the local model.
+// One logical request walks the pool in priority order: for each account (key) the models in priority order, so
+// account 1's gpt-oss-120b, then its gpt-oss-20b, then its qwen, then account 2's gpt-oss-120b … A 429 rests only that
+// (account, model) pair (or every key of the organization the message names) and the same call continues on the next pair
+// with no pause; "model not found" retires the pair; an invalid key is skipped; a flaky network/5xx rests the key. When
+// nothing is left the call throws GroqUnavailableError and the router falls back to the local model (or sends the break message).
 import { parseDuration } from './key-pool.js';
 
 export class GroqUnavailableError extends Error {
   constructor(message, { kind = 'exhausted', retryAfterMs = null } = {}) {
     super(message);
     this.name = 'GroqUnavailableError';
-    this.kind = kind; // no_keys | exhausted | rate_limit | rejected | server | network
+    this.kind = kind; // no_keys | exhausted | rate_limit | rejected | server | network | model
     this.retryAfterMs = retryAfterMs;
   }
 }
 
-/** The request itself is wrong (unknown model, too many tokens…): another key would fail the same way. */
+/** The request itself is wrong (too many tokens, bad parameter…): another account would fail the same way. */
 export class GroqRequestError extends Error {
   constructor(message, status) {
     super(message);
@@ -34,6 +36,12 @@ function retryHint(text) {
   return m ? parseDuration(m[1]) : null;
 }
 
+/** "...in organization `org_01abc` service tier..." → org_01abc (keys of one organization share their limits). */
+export function orgFromMessage(text) {
+  const m = /organization\s+[`'"]?(org_[A-Za-z0-9]+)/i.exec(String(text || ''));
+  return m ? m[1] : null;
+}
+
 export class GroqClient {
   constructor({ pool, baseUrl = 'https://api.groq.com/openai/v1', timeoutMs = 30_000, logger, fetchImpl } = {}) {
     this.pool = pool;
@@ -43,17 +51,17 @@ export class GroqClient {
     this.fetch = fetchImpl || ((...a) => fetch(...a));
   }
 
-  /** At least one key is ready right now. */
-  usable() {
-    return this.pool.hasAvailable();
+  /** At least one (account, model) pair is ready right now. */
+  usable(models) {
+    return this.pool.hasAvailable(models?.length ? models : this.pool.models);
   }
 
   #headers(secret) {
     return { authorization: `Bearer ${secret}`, 'content-type': 'application/json' };
   }
 
-  /** Open a streaming completion on one key. Updates the pool and throws a typed error on failure. */
-  async #open(key, body, signal) {
+  /** Open a streaming completion on one (account, model). Updates the pool and throws a typed error on failure. */
+  async #open(pick, body, signal) {
     const ctl = new AbortController();
     let timer;
     const arm = () => {
@@ -65,16 +73,17 @@ export class GroqClient {
     const sig = signal ? AbortSignal.any([signal, ctl.signal]) : ctl.signal;
     let res;
     try {
-      res = await this.fetch(`${this.baseUrl}/chat/completions`, { method: 'POST', headers: this.#headers(key.secret), body: JSON.stringify(body), signal: sig });
+      res = await this.fetch(`${this.baseUrl}/chat/completions`, { method: 'POST', headers: this.#headers(pick.secret), body: JSON.stringify(body), signal: sig });
     } catch (err) {
       watch.stop();
       if (signal?.aborted) throw err;
-      this.pool.transient(key.id, String(err.message || err));
+      this.pool.transient(pick.id, String(err.message || err));
       throw new GroqUnavailableError(`Groq network error: ${err.message || err}`, { kind: 'network' });
     }
     if (res.ok) {
       const h = res.headers;
-      this.pool.success(key.id, {
+      this.pool.success(pick.id, {
+        model: pick.model,
         remainingTokens: Number(h.get('x-ratelimit-remaining-tokens')) || (h.get('x-ratelimit-remaining-tokens') === '0' ? 0 : undefined),
         remainingRequests: h.get('x-ratelimit-remaining-requests') != null ? Number(h.get('x-ratelimit-remaining-requests')) : undefined,
         resetTokensMs: parseDuration(h.get('x-ratelimit-reset-tokens')),
@@ -91,53 +100,73 @@ export class GroqClient {
         return text;
       }
     })();
-    const msg = `Groq ${res.status}: ${String(detail).slice(0, 200)}`;
+    const msg = `Groq ${res.status} (${pick.model}): ${String(detail).slice(0, 200)}`;
     if (res.status === 429) {
       const retryAfterMs = parseDuration(res.headers.get('retry-after')) ?? retryHint(detail);
-      this.pool.rateLimited(key.id, { retryAfterMs, reason: String(detail).slice(0, 120) });
+      this.pool.rateLimited(pick.id, { model: pick.model, retryAfterMs, reason: String(detail).slice(0, 120), org: orgFromMessage(detail) });
       throw new GroqUnavailableError(msg, { kind: 'rate_limit', retryAfterMs });
     }
     if (res.status === 401 || res.status === 403) {
-      this.pool.authFailed(key.id, `HTTP ${res.status}`);
+      this.pool.authFailed(pick.id, `HTTP ${res.status}`);
       throw new GroqUnavailableError(msg, { kind: 'rejected' });
     }
+    if (res.status === 404) {
+      // "The model `x` does not exist or you do not have access to it": this account cannot use it, the others in the list may.
+      this.pool.modelUnavailable(pick.id, pick.model, String(detail).slice(0, 120));
+      throw new GroqUnavailableError(msg, { kind: 'model' });
+    }
+    if (res.status === 413) {
+      // Request larger than this model's per-minute budget: another model (or account) may take it.
+      this.pool.rateLimited(pick.id, { model: pick.model, retryAfterMs: 60_000, reason: 'request too large for this model' });
+      throw new GroqUnavailableError(msg, { kind: 'rate_limit', retryAfterMs: 60_000 });
+    }
     if (res.status === 408 || res.status >= 500) {
-      this.pool.transient(key.id, `HTTP ${res.status}`);
+      this.pool.transient(pick.id, `HTTP ${res.status}`);
       throw new GroqUnavailableError(msg, { kind: 'server' });
     }
-    throw new GroqRequestError(msg, res.status); // 400/404/413/422: not the key's fault
+    throw new GroqRequestError(msg, res.status); // 400/422: the request is wrong, not the account
   }
 
-  /**
-   * Streaming chat. Yields {type:'token', text} then {type:'done', stats} like OllamaClient.chat().
-   * Throws GroqUnavailableError when no key could serve it (nothing was yielded), GroqRequestError for a bad request.
-   */
-  async *chat({ model, messages, temperature = 0.6, maxTokens = 350, signal }) {
+  #body(model, { messages, temperature, maxTokens }) {
     const body = { model, messages, temperature, max_tokens: maxTokens, top_p: 0.9, stream: true };
     if (REASONING_HIDDEN.test(model)) body.reasoning_format = 'hidden';
     if (REASONING_LOW.test(model)) body.reasoning_effort = 'low';
+    return body;
+  }
+
+  /**
+   * Streaming chat. Yields {type:'meta', provider:'groq', model, keyLabel} once an (account, model) accepted the request, then
+   * {type:'token', text}…, then {type:'done', stats} like OllamaClient.chat().
+   * `models` is the priority list (default: the pool's); `model` alone is a one-model list.
+   * Throws GroqUnavailableError when nothing could serve it (nothing was yielded), GroqRequestError for a bad request.
+   */
+  async *chat({ model, models, messages, temperature = 0.6, maxTokens = 350, signal }) {
+    const list = models?.length ? models : model ? [model] : this.pool.models;
     const need = roughTokens(messages, maxTokens);
     const tried = new Set();
     let last = null;
     let opened = null;
     while (!opened) {
-      const key = this.pool.pick({ exclude: tried, needTokens: need });
-      if (!key) {
-        throw new GroqUnavailableError(last ? `${last.message} (no other key to try)` : this.pool.size ? 'every Groq key is rate-limited right now' : 'no Groq API key is configured', {
+      const pick = this.pool.pick({ exclude: tried, needTokens: need, models: list });
+      if (!pick) {
+        throw new GroqUnavailableError(last ? `${last.message} (nothing else to try)` : this.pool.size ? 'every Groq account is rate-limited right now' : 'no Groq API key is configured', {
           kind: last?.kind ?? (this.pool.size ? 'exhausted' : 'no_keys'),
-          retryAfterMs: this.pool.nextAvailableMs(),
+          retryAfterMs: this.pool.nextAvailableMs(list),
         });
       }
-      tried.add(key.id);
+      tried.add(`${pick.id}|${pick.model}`);
       try {
-        opened = { ...(await this.#open(key, body, signal)), key };
+        opened = { ...(await this.#open(pick, this.#body(pick.model, { messages, temperature, maxTokens }), signal)), key: pick };
       } catch (err) {
         if (err instanceof GroqRequestError || signal?.aborted || !(err instanceof GroqUnavailableError)) throw err;
         last = err;
-        this.log?.warn('Groq key failed, trying the next one', { key: key.label, kind: err.kind, retryAfterMs: err.retryAfterMs });
+        // a key that was rejected or is down fails for every model: skip all of its pairs
+        if (err.kind === 'rejected' || err.kind === 'network' || err.kind === 'server') tried.add(pick.id);
+        this.log?.warn('Groq account/model failed, trying the next one', { account: pick.label, model: pick.model, kind: err.kind, retryAfterMs: err.retryAfterMs });
       }
     }
     const { res, watch, key } = opened;
+    yield { type: 'meta', provider: 'groq', model: key.model, keyLabel: key.label };
     const started = performance.now();
     const decoder = new TextDecoder();
     let buf = '';
@@ -170,7 +199,7 @@ export class GroqClient {
     } finally {
       watch.stop();
     }
-    this.pool.success(key.id, { tokens: usage?.total_tokens || (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0), done: true });
+    this.pool.success(key.id, { model: key.model, tokens: usage?.total_tokens || (usage?.prompt_tokens || 0) + (usage?.completion_tokens || 0), done: true });
     const ms = (s) => Math.round((Number(s) || 0) * 1000);
     yield {
       type: 'done',
@@ -183,6 +212,7 @@ export class GroqClient {
         totalMs: ms(usage?.total_time) || Math.round(performance.now() - started),
         doneReason: finish === 'length' ? 'length' : finish || 'stop',
         provider: 'groq',
+        model: key.model,
         keyLabel: key.label,
       },
     };
@@ -190,14 +220,12 @@ export class GroqClient {
 
   /** Chat-capable model ids available to the first working key (cached by the caller). */
   async listModels({ signal } = {}) {
-    const tried = new Set();
-    for (;;) {
-      const key = this.pool.pick({ exclude: tried });
-      if (!key) throw new GroqUnavailableError('no usable Groq key', { kind: this.pool.size ? 'exhausted' : 'no_keys' });
-      tried.add(key.id);
-      const out = await GroqClient.probe(key.secret, { baseUrl: this.baseUrl, fetchImpl: this.fetch, signal, timeoutMs: 10_000 });
+    for (const id of this.pool.keys.keys()) {
+      // not a chat call: read the secret directly so the listing is not counted as usage
+      const out = await GroqClient.probe(this.pool.secretOf(id), { baseUrl: this.baseUrl, fetchImpl: this.fetch, signal, timeoutMs: 10_000 });
       if (out.ok) return out.models;
     }
+    throw new GroqUnavailableError('no usable Groq key', { kind: this.pool.size ? 'exhausted' : 'no_keys' });
   }
 
   /** Check a key without touching any pool: GET /models. Returns { ok, status, ms, models?, error? }. */

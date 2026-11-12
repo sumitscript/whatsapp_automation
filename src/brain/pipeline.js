@@ -335,7 +335,7 @@ export function createBrain({ kb, llm, memory, cache, logger, availability = nul
       stats = null;
       chunker = new MessageChunker({ split: settings.humanize });
       try {
-        for await (const ev of llm.chat({ model: settings.model, messages: req, temperature: retry ? Math.min(1.1, temperature + 0.25) : temperature, maxTokens, signal: sig, provider: settings.llmProvider, groqModel: settings.groqModel })) {
+        for await (const ev of llm.chat({ model: settings.model, messages: req, temperature: retry ? Math.min(1.1, temperature + 0.25) : temperature, maxTokens, signal: sig, provider: settings.llmProvider, groqModel: settings.groqModel, groqModels: settings.groqModels })) {
           if (ev.type === 'meta') {
             // The router says which provider/model is answering (Groq key pool or the local model); show it, not the setting.
             liveMeta.model = ev.model || liveMeta.model;
