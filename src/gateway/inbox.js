@@ -623,7 +623,7 @@ export class Inbox {
       this.echo.sent(r.id);
       this.selfChat.rememberNotice(null, r.id);
     }
-    return { chat: me, rendered, results };
+    return { chat: me, rendered, patch: this.wa.mediaPatch ?? null, results };
   }
 
   /** Send while remembering the body so the message_create echo is recognised as ours. */

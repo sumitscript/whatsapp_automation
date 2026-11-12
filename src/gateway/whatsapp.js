@@ -7,6 +7,7 @@ import path from 'node:path';
 import QRCode from 'qrcode';
 import wweb from 'whatsapp-web.js';
 import { SeenIds } from '../core/util.js';
+import { patchSendMessage } from '../core/wwebjs-patch.js';
 import { trySendStrategies } from '../core/image-send.js';
 
 const { Client, LocalAuth, MessageMedia } = wweb;
@@ -283,8 +284,15 @@ export class WhatsAppManager extends EventEmitter {
    */
   async sendImage(chatId, png, { caption, filename = 'invitation.png' } = {}) {
     this.#requireReady();
+    await this.ensureMediaPatch();
     const media = new MessageMedia('image/png', Buffer.from(png).toString('base64'), filename);
-    const { sent, strategy, results } = await trySendStrategies(this.#imageStrategies(chatId, media, caption), { preferred: this.lastImageStrategy });
+    let outcome;
+    try {
+      outcome = await trySendStrategies(this.#imageStrategies(chatId, media, caption), { preferred: this.lastImageStrategy });
+    } finally {
+      await this.restoreMediaPatch();
+    }
+    const { sent, strategy, results } = outcome;
     for (const r of results.filter((x) => !x.ok)) {
       const key = `${r.strategy}:${r.error}`;
       if (this.imageWarned.has(key)) continue; // once per way and error, not on every card
@@ -303,9 +311,61 @@ export class WhatsAppManager extends EventEmitter {
    */
   async testImageStrategies(chatId, png, caption, { all = false } = {}) {
     this.#requireReady();
+    await this.ensureMediaPatch();
     const media = new MessageMedia('image/png', Buffer.from(png).toString('base64'), 'card-test.png');
-    const { results } = await trySendStrategies(this.#imageStrategies(chatId, media, caption), { all });
+    let outcome;
+    try {
+      outcome = await trySendStrategies(this.#imageStrategies(chatId, media, caption), { all });
+    } finally {
+      await this.restoreMediaPatch();
+    }
+    const { results } = outcome;
     return results.map((r) => ({ strategy: r.strategy, ok: r.ok, ...(r.ok ? { id: r.message?.id?._serialized ?? null } : { error: r.error }) }));
+  }
+
+  /**
+   * whatsapp-web.js 1.34.7 cannot send media (wwebjs#201922). The image build patches the installed file; this applies the
+   * same one-line fix to the function that is actually running inside the WhatsApp page, so it holds whichever the
+   * server has and after WhatsApp Web reloads. Cheap and idempotent. Returns 'patched' | 'already' | 'notfound' |
+   * 'ambiguous' | 'missing' | 'error: …' (also kept in this.mediaPatch for the diagnostics).
+   */
+  async ensureMediaPatch() {
+    const page = this.client?.pupPage;
+    let status = 'missing';
+    try {
+      const src = page ? await page.evaluate(() => (window.WWebJS && window.WWebJS.sendMessage ? window.WWebJS.sendMessage.toString() : null)) : null;
+      if (src) {
+        const r = patchSendMessage(src);
+        status = r.status;
+        if (r.status === 'patched') {
+          await page.evaluate(() => {
+            window.__waOrigSend = window.__waOrigSend || window.WWebJS.sendMessage; // text sends use this function too: put the original back after the image
+          });
+          await page.evaluate(`window.WWebJS.sendMessage = ${r.src};`); // a string expression: not subject to the page's CSP
+        }
+      }
+    } catch (err) {
+      status = `error: ${String(err.message || err).slice(0, 160).replace(/\s+/g, ' ')}`;
+    }
+    if (status !== this.mediaPatch) {
+      this.mediaPatch = status;
+      (status === 'patched' || status === 'already' ? this.log.info : this.log.warn).call(this.log, 'WhatsApp media-send patch', { status });
+    }
+    return status;
+  }
+
+  /** Put the page's original sendMessage back after an image send that needed the run-time patch. */
+  async restoreMediaPatch() {
+    try {
+      await this.client?.pupPage?.evaluate(() => {
+        if (window.__waOrigSend) {
+          window.WWebJS.sendMessage = window.__waOrigSend;
+          delete window.__waOrigSend;
+        }
+      });
+    } catch (err) {
+      this.log.warn('Could not restore the page sendMessage', { err: err.message });
+    }
   }
 
   async #contact(chatId) {

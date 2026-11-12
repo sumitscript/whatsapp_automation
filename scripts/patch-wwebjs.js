@@ -10,22 +10,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { patchSendMessage } from '../src/core/wwebjs-patch.js';
 
-const MARK = 'delete message.__x_id';
-// The end of the `const message = { ..., ...extraOptions, };` literal inside sendMessage.
-const OBJECT_END = /(\.\.\.extraOptions,\s*\n\s*\};)/g;
-
-/** @returns {{ src: string, status: 'patched'|'already'|'notfound'|'ambiguous' }} */
-export function patchSendMessage(src) {
-  if (src.includes(MARK)) return { src, status: 'already' };
-  const hits = src.match(OBJECT_END) || [];
-  if (hits.length !== 1) return { src, status: hits.length ? 'ambiguous' : 'notfound' };
-  const patched = src.replace(
-    OBJECT_END,
-    '$1\n\n        // wwebjs/whatsapp-web.js#201922: the media model\'s private __x_id collides with the outgoing Msg\'s id\n        delete message.__x_id;',
-  );
-  return { src: patched, status: 'patched' };
-}
+export { patchSendMessage };
 
 export function patchFile(file) {
   if (!fs.existsSync(file)) return 'missing';
