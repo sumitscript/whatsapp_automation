@@ -256,3 +256,7 @@ When someone asks you for a meeting or a favour, the bot sends a message to your
 - Replying to a request message with just `ok` or `no` also works; so does a bare `ok` when only one request is waiting.
 
 Concurrency: `GROQ_CONCURRENCY` (default 32) caps parallel Groq calls; the real limit is each key's own rate limit, which the key rotation handles. `LLM_CONCURRENCY` is only for the local CPU model (keep 1 to 2).
+
+## Invitation cards and the whatsapp-web.js media bug
+
+whatsapp-web.js 1.34.7 cannot send any image (error `Data passed to getter must include an id property`), which broke the invitation cards. The image build applies the upstream one-line fix (`scripts/patch-wwebjs.js`, wwebjs issue #201922) after `npm ci`; the build log line `[patch-wwebjs] patched…` shows it ran (a `WARNING` line means the library changed and the patch no longer fits). To check on the server, Settings → or `POST /api/wa/test-image` sends a small "Card test" picture to your own number and reports which sending method worked. Remove the patch step once a whatsapp-web.js release newer than 1.34.7 contains the fix.

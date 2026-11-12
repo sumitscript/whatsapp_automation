@@ -21,6 +21,9 @@ COPY src ./src
 COPY public ./public
 COPY db ./db
 COPY scripts ./scripts
+# whatsapp-web.js 1.34.7 cannot send media (invitation cards): "Data passed to getter must include an id property".
+# One-line upstream fix (wwebjs#201922, on their main branch, not released yet); the script says what it did in the build log.
+RUN node scripts/patch-wwebjs.js
 COPY test/eval ./test/eval
 COPY knowledge_base ./knowledge_base
 
