@@ -104,7 +104,7 @@ export async function mount(root, { hub }) {
               <label class="radio-card"><input type="radio" name="llmProvider" value="ollama" /><span><strong>Local only</strong><small>Always the model on this server's CPU. Private, but slower. Groq is never used</small></span></label>
               <label class="radio-card"><input type="radio" name="llmProvider" value="groq" /><span><strong>Groq only</strong><small>Never the local model. When no Groq key can answer, people get the short-break message below</small></span></label>
             </div>
-            <label class="field"><span>Groq model</span><input name="groqModel" list="gq-models" placeholder="llama-3.3-70b-versatile" autocomplete="off" /><datalist id="gq-models"></datalist></label>
+            <label class="field"><span>Groq model</span><input name="groqModel" list="gq-models" placeholder="openai/gpt-oss-120b" autocomplete="off" /><datalist id="gq-models"></datalist></label>
             <label class="field"><span>Short-break message <span class="muted small">(sent in Groq-only mode when Groq cannot answer)</span></span>
               <textarea name="groqBusyMessage" rows="3" maxlength="1000"></textarea>
               <small class="muted">Placeholders: <code class="wa-inline">{name}</code> <code class="wa-inline">{persona}</code> <code class="wa-inline">{owner}</code>. Sent at most once every 5 minutes per chat.</small></label>
@@ -368,6 +368,12 @@ export async function mount(root, { hub }) {
         : d.provider === 'groq'
           ? html`Mode: <strong>Groq only</strong> (${d.model}). ${keysText} ${ready ? '' : 'No key can answer right now, so people get the short-break message.'}${raw(served)}`
           : html`Mode: <strong>Auto</strong>. ${d.keys.length ? `Groq (${d.model}) is answering${ready ? '' : ', but every key is resting, so the local model is answering for now'}. ${keysText}` : 'No Groq key yet, so the local model is answering. Add a key below and Groq starts right away.'}${raw(served)}`;
+    // The last time Groq could not answer (wrong model name, every key resting, Groq down…), so it is never a mystery.
+    const lp = d.lastFallback;
+    const problem = lp && Date.now() - lp.at < 30 * 60_000
+      ? html` <div class="muted small">Last Groq problem (${new Date(lp.at).toLocaleTimeString()}): ${lp.reason}${/does not exist|access|404/i.test(lp.reason) ? ' Choose a model your key can use from the list in the model box.' : ''}</div>`
+      : '';
+    $('#gq-summary', root).insertAdjacentHTML('beforeend', problem);
     const rows = d.keys.map((k) => {
       const pill =
         k.state === 'ready'
@@ -405,7 +411,7 @@ export async function mount(root, { hub }) {
   }
   gqForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const body = { llmProvider: gqForm.elements.llmProvider.value, groqModel: gqForm.elements.groqModel.value.trim() || 'llama-3.3-70b-versatile', groqBusyMessage: gqForm.elements.groqBusyMessage.value.trim() };
+    const body = { llmProvider: gqForm.elements.llmProvider.value, groqModel: gqForm.elements.groqModel.value.trim() || 'openai/gpt-oss-120b', groqBusyMessage: gqForm.elements.groqBusyMessage.value.trim() };
     if (!body.groqBusyMessage) delete body.groqBusyMessage;
     try {
       await api.saveSettings(body);

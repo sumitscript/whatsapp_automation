@@ -25,7 +25,7 @@ export class GroqRequestError extends Error {
 
 const REASONING_HIDDEN = /^(qwen\/qwen3|qwen3|deepseek-r1)/i;
 const REASONING_LOW = /gpt-oss/i;
-const NOT_CHAT = /whisper|tts|guard|playai|embed/i;
+const NOT_CHAT = /whisper|tts|guard|playai|orpheus|embed/i;
 const roughTokens = (messages, maxTokens) => Math.ceil(messages.reduce((n, m) => n + String(m.content || '').length, 0) / 3.5) + (maxTokens || 0);
 
 /** Provider's "try again in 2m3.5s" hint from an error body, when there is no retry-after header. */

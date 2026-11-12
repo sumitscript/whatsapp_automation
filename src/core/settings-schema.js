@@ -46,7 +46,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   replyMode: 'session', // session (/hi … /bye) | all | off
   model: 'gemma3:4b',
   llmProvider: 'auto', // 'auto' = Groq when a key exists, the local model when Groq is exhausted or has no key | 'ollama' = local only | 'groq' = Groq only (see groqBusyMessage)
-  groqModel: 'llama-3.3-70b-versatile', // model id on Groq (see the model list in Settings)
+  groqModel: 'openai/gpt-oss-120b', // model id on Groq. Which models exist depends on the account: pick one from the list in Settings
   groqFallback: true, // deprecated and ignored (kept so older saved settings stay valid): the provider choice decides now
   groqBusyMessage: DEFAULT_GROQ_BUSY, // the reply in "Groq only" mode when Groq cannot answer ({name} {persona} {owner})
   temperature: 0.7,

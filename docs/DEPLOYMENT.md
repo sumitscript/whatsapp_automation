@@ -239,7 +239,7 @@ Run it from a checkout (with `npm run eval -- --model gemma3:4b`, `OLLAMA_URL` p
 
 1. Create one or more API keys at console.groq.com (a separate key per account/project gives separate rate limits).
 2. Either put them in the server `.env` (`GROQ_API_KEYS=gsk_a,gsk_b`, then `docker compose up -d`), or add them in the console under **Settings → AI provider → Groq API keys** (stored encrypted; the console verifies each key before saving).
-3. In the same card pick the mode and a model (e.g. `llama-3.3-70b-versatile`, or `llama-3.1-8b-instant` for the highest limits) and save. It applies to the next message.
+3. In the same card pick the mode and a model and save (the model box lists what your key can use; the default is `openai/gpt-oss-120b`; which models exist depends on the Groq account). It applies to the next message.
    - **Auto** (default): Groq as soon as a key is added; the local model takes over when every key is used up or Groq is down.
    - **Local only**: the model on this server, Groq is never used.
    - **Groq only**: never the local model. When no key can answer, the contact gets the "short break" message you set in the same card (once per 5 minutes per chat).
