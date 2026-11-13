@@ -286,5 +286,5 @@ Order of answering in Auto: Groq (accounts, models), then Cloudflare Workers AI,
 
 - Create a Cloudflare API token from the **Workers AI** template (My Profile → API Tokens) and note the account id (dashboard sidebar, 32 characters). Add both in Settings → Cloudflare accounts, or set `CLOUDFLARE_API_KEYS=<account_id>:<token>` (comma separated for several accounts) in the server `.env`.
 - Free allowance: 10,000 neurons per Cloudflare account per day, shared by every model, reset at 00:00 UTC (05:30 IST). The default model `@cf/google/gemma-4-26b-a4b-it` gives roughly 560 replies a day; `@cf/meta/llama-3.1-8b-instruct-fp8` roughly 400; `@cf/meta/llama-3.2-3b-instruct` roughly 870 but weaker. Cloudflare reports no usage, so the bar in the console is an estimate.
-- Hover (or tap) the **i** next to any account for its limit bars: used / left, exhausted, time until reset and the clock time of the reset.
+- Hover (or tap) the usage bar on any account row for its limit bars: used / left, exhausted, time until reset and the clock time of the reset.
 - If WhatsApp goes quiet after sitting idle, the gateway now notices (health check every 45 s, three misses in a row) and reconnects from the saved session by itself. Look for "WhatsApp looks stalled" in the logs.

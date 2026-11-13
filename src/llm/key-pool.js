@@ -173,7 +173,7 @@ export class KeyPool {
    * HTTP 429 for this model. `org` (from the provider's message) makes the rest apply to every key of that organization:
    * they share the limit.
    */
-  rateLimited(id, { model = ANY, retryAfterMs, reason = 'rate limit', org = null, hit = null } = {}) {
+  rateLimited(id, { model = ANY, retryAfterMs, reason = 'rate limit', org = null, hit = null, daily = false } = {}) {
     const k = this.keys.get(id);
     if (!k) return;
     if (org) k.org = org;
@@ -183,7 +183,7 @@ export class KeyPool {
     p.limited++;
     p.lastError = reason;
     if (hit) p.hit = { ...hit, at: this.now() }; // which limit was reached (tokens per day…) and what the provider said it was
-    p.cooldownUntil = this.now() + Math.min(Math.max(retryAfterMs ?? this.defaultCooldownMs, 1000), this.maxCooldownMs);
+    p.cooldownUntil = this.now() + Math.min(Math.max(retryAfterMs ?? this.defaultCooldownMs, 1000), daily ? 25 * 3_600_000 : this.maxCooldownMs); // a daily allowance may rest for most of a day
   }
 
   /** 404 "model does not exist / no access": this account cannot use the model; stop trying it for hours. */

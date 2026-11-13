@@ -1,7 +1,7 @@
 // Settings, model management, playground and password change.
 import { api } from '../api.js';
 import { icons } from '../icons.js';
-import { infoButton, installLimitPanel, mountCloudflare } from './provider-limits.js';
+import { installLimitPanel, mountCloudflare, renderAccounts } from './provider-limits.js';
 import { $, confirmDialog, escapeHtml, formatBytes, formatMs, formatNumber, formatWhatsApp, html, raw, toast } from '../util.js';
 
 const TIER_LABEL = { fast: 'Fast', balanced: 'Balanced', quality: 'Quality' };
@@ -11,7 +11,7 @@ export async function mount(root, { hub }) {
 
   root.innerHTML = html`
     <div class="page settings-page">
-      <header class="page-header"><div><h1>Settings &amp; models</h1><p class="muted">Changes apply to the next message — no restart needed.</p></div></header>
+      <header class="page-header"><div><h1>Settings</h1><p class="muted">Changes apply to the next message.</p></div></header>
 
       <div class="settings-grid">
         <section class="card">
@@ -20,41 +20,36 @@ export async function mount(root, { hub }) {
             <fieldset class="field">
               <legend>Who gets AI replies</legend>
               <div class="radio-cards">
-                <label class="radio-card"><input type="radio" name="replyMode" value="session" /><span><strong>Session</strong><small>Only after the person sends a start command</small></span></label>
-                <label class="radio-card"><input type="radio" name="replyMode" value="all" /><span><strong>Everyone</strong><small>All chats except blocked/paused</small></span></label>
-                <label class="radio-card"><input type="radio" name="replyMode" value="off" /><span><strong>Off</strong><small>Log messages, never reply</small></span></label>
+                <label class="radio-card"><input type="radio" name="replyMode" value="session" /><span><strong>Session</strong><small>After a start command</small></span></label>
+                <label class="radio-card"><input type="radio" name="replyMode" value="all" /><span><strong>Everyone</strong><small>All chats</small></span></label>
+                <label class="radio-card"><input type="radio" name="replyMode" value="off" /><span><strong>Off</strong><small>Never reply</small></span></label>
               </div>
             </fieldset>
             <label class="field"><span>Owner name</span><input name="ownerName" placeholder="Name the assistant represents" /></label>
-            <label class="field"><span>Persona / system prompt <span class="muted small">(leave empty to use the built-in eSumit persona, which improves with updates)</span></span>
-              <textarea name="persona" rows="8" class="code-area small-area" placeholder="Empty = built-in eSumit persona (recommended)"></textarea>
+            <label class="field"><span>Persona prompt</span>
+              <textarea name="persona" rows="8" class="code-area small-area" placeholder="Empty = built-in persona"></textarea>
             </label>
             <div class="form-grid">
               <label class="field"><span>Temperature <output id="temp-out"></output></span>
                 <input type="range" name="temperature" min="0" max="1.5" step="0.05" />
               </label>
               <label class="field"><span>Max reply tokens</span><input type="number" name="maxTokens" min="32" max="4096" step="16" /></label>
-              <label class="field"><span>Debounce (ms)</span><input type="number" name="debounceMs" min="0" max="10000" step="100" />
-                <small class="muted">Wait for follow-up messages and answer them together.</small></label>
+              <label class="field"><span>Wait for follow-ups (ms)</span><input type="number" name="debounceMs" min="0" max="10000" step="100" /></label>
             </div>
             <div class="toggles">
-              <label class="switch-row"><input type="checkbox" class="switch" name="humanize" /><span>Human-like pacing<small class="muted"> — typing indicator &amp; split long replies</small></span></label>
-              <label class="switch-row"><input type="checkbox" class="switch" name="answerCache" /><span>Answer cache<small class="muted"> — instant replies to repeated factual questions</small></span></label>
-              <label class="switch-row"><input type="checkbox" class="switch" name="prefillAhead" /><span>Think ahead<small class="muted"> — pre-read the prompt while they type, so replies start sooner</small></span></label>
+              <label class="switch-row"><input type="checkbox" class="switch" name="humanize" /><span>Human-like pacing</span></label>
+              <label class="switch-row"><input type="checkbox" class="switch" name="answerCache" /><span>Answer cache</span></label>
+              <label class="switch-row"><input type="checkbox" class="switch" name="prefillAhead" /><span>Think ahead</span></label>
               <label class="switch-row"><input type="checkbox" class="switch" name="replyInGroups" /><span>Reply in groups</span></label>
             </div>
 
             <h3 class="section-title">eSumit persona &amp; sessions</h3>
             <div class="form-grid">
               <label class="field"><span>Persona name</span><input name="personaName" placeholder="eSumit" /></label>
-              <label class="field"><span>Start commands</span><input name="startCommands" placeholder="/hi" />
-                <small class="muted">Comma-separated, e.g. /hi, /start</small></label>
-              <label class="field"><span>Stop commands</span><input name="stopCommands" placeholder="/bye" />
-                <small class="muted">Comma-separated, e.g. /bye, /stop</small></label>
-              <label class="field"><span>Auto-end after idle (minutes)</span><input type="number" name="sessionIdleMinutes" min="0" max="1440" />
-                <small class="muted">0 = never end automatically</small></label>
-              <label class="field"><span>Pause AI after I reply from my phone (seconds)</span><input type="number" name="takeoverSeconds" min="0" max="86400" />
-                <small class="muted">0 = never pause. Default 30 s.</small></label>
+              <label class="field"><span>Start commands</span><input name="startCommands" placeholder="/hi, /start" /></label>
+              <label class="field"><span>Stop commands</span><input name="stopCommands" placeholder="/bye, /stop" /></label>
+              <label class="field"><span>End session after idle (min, 0 = never)</span><input type="number" name="sessionIdleMinutes" min="0" max="1440" /></label>
+              <label class="field"><span>Pause AI after I reply (sec, 0 = never)</span><input type="number" name="takeoverSeconds" min="0" max="86400" /></label>
             </div>
             <label class="field"><span>Welcome message</span>
               <textarea name="welcomeMessage" rows="3" placeholder="Hi {name}! I'm {persona}, {owner}'s AI twin. Send {stop} to end."></textarea>
@@ -62,48 +57,42 @@ export async function mount(root, { hub }) {
             <label class="field"><span>Goodbye message</span>
               <textarea name="goodbyeMessage" rows="3" placeholder="Bye {name}! Send {start} any time to chat with {persona} again."></textarea>
             </label>
-            <label class="switch-row"><input type="checkbox" class="switch" name="notifyOnTimeout" /><span>Tell people when their session times out<small class="muted"> — sent once, with how to start again</small></span></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="notifyOnTimeout" /><span>Tell people when their session times out</span></label>
             <label class="field"><span>Timeout message</span>
               <textarea name="timeoutMessage" rows="3" placeholder="Hey {name}, it's been quiet… send {start} to chat again."></textarea>
             </label>
             <label class="field"><span>Reply to voice notes, photos &amp; stickers</span>
               <textarea name="unsupportedMessage" rows="3" placeholder="Hey {name}! I can only read text, so I can't open {kind}…"></textarea>
             </label>
-            <p class="muted small placeholder-help">Placeholders: <code class="wa-inline">{name}</code> contact name ·
-              <code class="wa-inline">{persona}</code> persona name · <code class="wa-inline">{owner}</code> owner name ·
-              <code class="wa-inline">{start}</code> first start command · <code class="wa-inline">{stop}</code> first stop command ·
-              <code class="wa-inline">{kind}</code> what they sent (voice notes, photos…, only in the media reply)</p>
+            <p class="muted small placeholder-help">Placeholders: <code class="wa-inline">{name}</code> <code class="wa-inline">{persona}</code> <code class="wa-inline">{owner}</code> <code class="wa-inline">{start}</code> <code class="wa-inline">{stop}</code> <code class="wa-inline">{kind}</code></p>
 
             <h3 class="section-title">Agenda &amp; alerts</h3>
-            <label class="switch-row"><input type="checkbox" class="switch" name="agendaEnabled" /><span>Collect appointments &amp; to-dos from chats<small class="muted"> — "let's meet tomorrow at 5" shows up in the Agenda</small></span></label>
-            <label class="switch-row"><input type="checkbox" class="switch" name="notifyOwnerOnAgenda" /><span>WhatsApp me about new agenda items<small class="muted"> — sent to your own number</small></span></label>
-            <label class="switch-row"><input type="checkbox" class="switch" name="meetingAck" /><span>Instant reply to meeting requests<small class="muted"> — in their language (English, Hinglish, Hindi, Marathi, Gujarati); says it was noted and passed on, never agrees for you</small></span></label>
-            <label class="switch-row"><input type="checkbox" class="switch" name="agendaConfirm" /><span>Tell the contact when I accept an appointment<small class="muted"> — the Agenda's Confirm button sends a confirmation message</small></span></label>
-            <label class="switch-row"><input type="checkbox" class="switch" name="agendaCard" /><span>Attach an invitation card to the confirmation<small class="muted"> — an image generated fresh for each appointment</small></span></label>
-            <label class="switch-row"><input type="checkbox" class="switch" name="alertOwner" /><span>WhatsApp me if the AI goes down<small class="muted"> — and when it recovers</small></span></label>
-            <label class="field"><span>Timezone for "tomorrow at 5pm"</span><input name="timezone" placeholder="Asia/Kolkata" />
-              <small class="muted">IANA name, e.g. Asia/Kolkata, Europe/London, America/New_York</small></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="agendaEnabled" /><span>Collect appointments &amp; to-dos</span></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="notifyOwnerOnAgenda" /><span>WhatsApp me about new agenda items</span></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="meetingAck" /><span>Instant reply to meeting requests</span></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="agendaConfirm" /><span>Confirm to the contact when I accept</span></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="agendaCard" /><span>Attach an invitation card</span></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="alertOwner" /><span>WhatsApp me if the AI goes down</span></label>
+            <label class="field"><span>Timezone</span><input name="timezone" placeholder="Asia/Kolkata" /></label>
 
             <h3 class="section-title">Availability</h3>
-            <p class="muted small">Meetings are only offered and confirmed inside these hours (in the timezone above) and never on top of another confirmed meeting. A request for a taken time gets "not available" plus your free slots.</p>
-            <label class="switch-row"><input type="checkbox" class="switch" name="enforceAvailability" /><span>Check availability<small class="muted"> — tell people a taken or out-of-hours time is unavailable, and ask you before double-booking</small></span></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="enforceAvailability" /><span>Check availability before confirming</span></label>
             <div class="form-grid">
-              <label class="field"><span>Working hours start</span><input type="time" name="workStart" /></label>
-              <label class="field"><span>Working hours end</span><input type="time" name="workEnd" /></label>
-              <label class="field"><span>Meeting length (minutes)</span><input type="number" name="meetingMinutes" min="5" max="480" step="5" /></label>
-              <label class="field"><span>Gap around meetings (minutes)</span><input type="number" name="meetingBufferMinutes" min="0" max="240" step="5" /></label>
+              <label class="field"><span>Work starts</span><input type="time" name="workStart" /></label>
+              <label class="field"><span>Work ends</span><input type="time" name="workEnd" /></label>
+              <label class="field"><span>Meeting length (min)</span><input type="number" name="meetingMinutes" min="5" max="480" step="5" /></label>
+              <label class="field"><span>Gap between meetings (min)</span><input type="number" name="meetingBufferMinutes" min="0" max="240" step="5" /></label>
             </div>
-            <fieldset class="field"><legend>Days you take meetings</legend>
+            <fieldset class="field"><legend>Meeting days</legend>
               <div class="chip-group"><label class="chip"><input type="checkbox" name="wd" value="mon" /> Mon</label><label class="chip"><input type="checkbox" name="wd" value="tue" /> Tue</label><label class="chip"><input type="checkbox" name="wd" value="wed" /> Wed</label><label class="chip"><input type="checkbox" name="wd" value="thu" /> Thu</label><label class="chip"><input type="checkbox" name="wd" value="fri" /> Fri</label><label class="chip"><input type="checkbox" name="wd" value="sat" /> Sat</label><label class="chip"><input type="checkbox" name="wd" value="sun" /> Sun</label></div>
             </fieldset>
 
             <h3 class="section-title">Memory &amp; context</h3>
             <div class="form-grid">
-              <label class="field"><span>Max turns kept verbatim</span><input type="number" name="historyTurns" min="0" max="50" /></label>
-              <label class="field"><span>History token budget</span><input type="number" name="historyTokens" min="200" max="6000" step="50" />
-                <small class="muted">Smaller = faster replies on CPU</small></label>
+              <label class="field"><span>Messages kept in context</span><input type="number" name="historyTurns" min="0" max="50" /></label>
+              <label class="field"><span>Context token budget</span><input type="number" name="historyTokens" min="200" max="6000" step="50" /></label>
             </div>
-            <label class="switch-row"><input type="checkbox" class="switch" name="memoryEnabled" /><span>Long-term memory<small class="muted"> — remember facts about each contact across sessions</small></span></label>
+            <label class="switch-row"><input type="checkbox" class="switch" name="memoryEnabled" /><span>Long-term memory</span></label>
             <div class="form-actions"><button class="btn btn-primary" type="submit">${raw(icons.save)} Save settings</button></div>
           </form>
         </section>
@@ -111,35 +100,51 @@ export async function mount(root, { hub }) {
         <div class="settings-col">
         <section class="card" id="groq-card">
           <h2 class="card-title">AI provider</h2>
-          <p class="muted small" id="gq-summary">Loading…</p>
           <form id="gq-form" class="stack">
-            <div class="radio-cards">
-              <label class="radio-card"><input type="radio" name="llmProvider" value="auto" /><span><strong>Auto <span class="muted small">(recommended)</span></strong><small>Groq first, then Cloudflare, while a key can answer; the local model takes over when every account is used up, the providers are down, or no key is added</small></span></label>
-              <label class="radio-card"><input type="radio" name="llmProvider" value="ollama" /><span><strong>Local only</strong><small>Always the model on this server's CPU. Private, but slower. Groq is never used</small></span></label>
-              <label class="radio-card"><input type="radio" name="llmProvider" value="groq" /><span><strong>Cloud only</strong><small>Groq, then Cloudflare, never the local model. When no account can answer, people get the short-break message below</small></span></label>
+            <div class="segmented" role="radiogroup" aria-label="AI provider mode">
+              <label title="Cloud first (Groq, then Cloudflare); the local model is the backup"><input type="radio" name="llmProvider" value="auto" /><span>Auto</span></label>
+              <label title="Always the model on this server"><input type="radio" name="llmProvider" value="ollama" /><span>Local</span></label>
+              <label title="Groq, then Cloudflare; never the local model"><input type="radio" name="llmProvider" value="groq" /><span>Cloud only</span></label>
             </div>
-            <label class="field"><span>Models, best first <span class="muted small">(tried in this order inside every account; Groq's limits are per model)</span></span>
-              <input name="groqModels" list="gq-models" placeholder="openai/gpt-oss-120b, openai/gpt-oss-20b, qwen/qwen3.8-27b" autocomplete="off" /><datalist id="gq-models"></datalist>
-              <small class="muted">Up to 8, separated by commas. A model an account cannot use is skipped for that account.</small></label>
-            <fieldset class="field"><legend>Which account first?</legend>
-              <div class="radio-cards">
-                <label class="radio-card"><input type="radio" name="groqStrategy" value="priority" /><span><strong>Priority</strong><small>Account 1 with all its models first, then account 2, then 3… (top of the list below is first)</small></span></label>
-                <label class="radio-card"><input type="radio" name="groqStrategy" value="spread" /><span><strong>Spread</strong><small>Accounts take turns, so every account's quota is used evenly</small></span></label>
+            <p class="muted small" id="gq-summary">Loading…</p>
+          </form>
+
+          <div class="prov-head"><h3>Groq</h3><button type="button" class="btn btn-ghost btn-sm" data-add="gq-add">${raw(icons.plus)} Add</button></div>
+          <div id="gq-keys" class="acct-list"></div>
+          <form id="gq-add" class="add-form" hidden>
+            <input name="label" placeholder="Name (optional)" aria-label="Name" maxlength="60" />
+            <input name="key" type="password" placeholder="Groq API key (gsk_…)" autocomplete="off" aria-label="Groq API key" required />
+            <button class="btn btn-primary btn-sm" type="submit">Add</button>
+          </form>
+
+          <div class="prov-head"><h3>Cloudflare</h3><button type="button" class="btn btn-ghost btn-sm" data-add="cf-add">${raw(icons.plus)} Add</button></div>
+          <div id="cf-keys" class="acct-list"></div>
+          <form id="cf-add" class="add-form" hidden>
+            <input name="label" placeholder="Name (optional)" aria-label="Name" maxlength="60" />
+            <input name="accountId" placeholder="Account ID" autocomplete="off" aria-label="Cloudflare account id" required />
+            <input name="token" type="password" placeholder="API token" autocomplete="off" aria-label="Cloudflare API token" required />
+            <button class="btn btn-primary btn-sm" type="submit">Add</button>
+          </form>
+
+          <details class="adv">
+            <summary>Advanced</summary>
+            <div class="stack">
+              <label class="field"><span>Groq models, best first</span>
+                <input form="gq-form" name="groqModels" list="gq-models" placeholder="openai/gpt-oss-120b, openai/gpt-oss-20b" autocomplete="off" /><datalist id="gq-models"></datalist></label>
+              <label class="field"><span>Cloudflare model</span>
+                <input form="gq-form" name="cloudflareModel" list="cf-models" placeholder="@cf/google/gemma-4-26b-a4b-it" autocomplete="off" />
+                <datalist id="cf-models"><option value="@cf/google/gemma-4-26b-a4b-it"></option><option value="@cf/meta/llama-3.1-8b-instruct-fp8"></option><option value="@cf/meta/llama-3.2-3b-instruct"></option></datalist></label>
+              <div class="field"><span>Account order</span>
+                <div class="segmented" role="radiogroup" aria-label="Account order">
+                  <label title="Account 1 first, with all its models, then account 2"><input form="gq-form" type="radio" name="groqStrategy" value="priority" /><span>Priority</span></label>
+                  <label title="Accounts take turns"><input form="gq-form" type="radio" name="groqStrategy" value="spread" /><span>Spread</span></label>
+                </div>
               </div>
-            </fieldset>
-            <label class="field"><span>Short-break message <span class="muted small">(sent in Groq-only mode when Groq cannot answer)</span></span>
-              <textarea name="groqBusyMessage" rows="3" maxlength="1000"></textarea>
-              <small class="muted">Placeholders: <code class="wa-inline">{name}</code> <code class="wa-inline">{persona}</code> <code class="wa-inline">{owner}</code>. Sent at most once every 5 minutes per chat.</small></label>
-            <div class="form-actions"><button class="btn btn-primary" type="submit">${raw(icons.save)} Save provider</button></div>
-          </form>
-          <h3 class="section-title">Groq API keys</h3>
-          <div id="gq-keys" class="table-scroll"></div>
-          <form id="gq-add" class="inline-form">
-            <input name="label" placeholder="Label (optional)" aria-label="Key label" maxlength="60" />
-            <input name="key" type="password" placeholder="gsk_…" autocomplete="off" aria-label="Groq API key" required />
-            <button class="btn btn-ghost" type="submit">${raw(icons.plus)} Add key</button>
-          </form>
-          <p class="muted small">Keys are stored encrypted on the server and never shown again. When one key hits its rate limit the next one takes over instantly; when all are used up, the local model answers. Keys set in the server's <code class="wa-inline">GROQ_API_KEYS</code> are listed here read-only.</p>
+              <label class="field"><span>Break message <span class="muted small">({name} {persona} {owner})</span></span>
+                <textarea form="gq-form" name="groqBusyMessage" rows="3" maxlength="1000"></textarea></label>
+              <div class="form-actions"><button class="btn btn-primary" type="submit" form="gq-form">${raw(icons.save)} Save</button></div>
+            </div>
+          </details>
         </section>
 
         <section class="card">
@@ -162,7 +167,6 @@ export async function mount(root, { hub }) {
             <h2 class="card-title">Playground</h2>
             <button class="btn btn-ghost btn-sm" id="pg-reset">${raw(icons.eraser)} Reset</button>
           </div>
-          <p class="muted small">Talk to the bot exactly as a WhatsApp contact would — nothing is sent to WhatsApp.</p>
           <div class="pg-messages wallpaper" id="pg-messages"></div>
           <form class="composer" id="pg-form">
             <textarea id="pg-input" rows="1" placeholder="Try: “Hi! Sumit ke projects batao” or tell it a joke" aria-label="Playground message"></textarea>
@@ -375,65 +379,41 @@ export async function mount(root, { hub }) {
     }
   });
 
-  // ---------- Groq provider + keys ----------
+  // ---------- AI provider: mode, accounts, advanced ----------
   const gq = { data: null, timer: null, modelsLoaded: false, busyMessage: null };
   const gqForm = $('#gq-form', root);
-  const cooldownText = (ms) => (ms >= 90_000 ? `${Math.ceil(ms / 60_000)} min` : `${Math.ceil(ms / 1000)} s`);
+  const editing = () => Array.from(gqForm.elements).includes(document.activeElement);
+
+  // one short status line from both providers' account lists
+  function renderSummary() {
+    const g = gq.data;
+    if (!g) return;
+    const cfData = cf.data();
+    const keys = [...g.keys, ...(cfData?.keys || [])];
+    const ready = keys.filter((k) => k.state === 'ready').length;
+    let line;
+    if (g.provider === 'ollama') line = 'Local model only.';
+    else if (!keys.length) line = g.provider === 'groq' ? 'No account yet: people get the break message.' : 'No cloud account yet: the local model answers.';
+    else if (g.provider === 'groq') line = ready ? `${ready} of ${keys.length} accounts ready.` : 'No account can answer: people get the break message.';
+    else line = ready ? `${ready} of ${keys.length} accounts ready.` : 'All accounts are resting: the local model answers.';
+    const lp = g.lastFallback;
+    const recent = lp && Date.now() - lp.at < 10 * 60_000 && g.provider !== 'ollama' && !ready;
+    $('#gq-summary', root).textContent = recent ? `${line} Last problem: ${lp.reason}` : line;
+  }
 
   function renderGroq() {
     const d = gq.data;
     if (!d) return;
-    if (!gqForm.contains(document.activeElement)) {
+    if (!editing()) {
       Array.from(gqForm.elements.llmProvider).forEach((r) => (r.checked = r.value === d.provider));
       gqForm.elements.groqModels.value = (d.models?.length ? d.models : [d.model]).filter(Boolean).join(', ');
       Array.from(gqForm.elements.groqStrategy).forEach((r) => (r.checked = r.value === (d.strategy || 'priority')));
       if (gq.busyMessage != null) gqForm.elements.groqBusyMessage.value = gq.busyMessage;
     }
-    const ready = d.keys.filter((k) => k.state === 'ready').length;
-    const c = d.counters;
-    const served = c ? html` <span class="muted">Served: ${c.groq} Groq · ${c.local} local${c.fallbacks ? ` · ${c.fallbacks} fell back` : ''}.</span>` : '';
-    const keysText = d.keys.length ? `${ready} of ${d.keys.length} key${d.keys.length === 1 ? '' : 's'} ready.` : 'No Groq key added yet.';
-    $('#gq-summary', root).innerHTML =
-      d.provider === 'ollama'
-        ? html`Mode: <strong>Local only</strong>. Groq is not used${raw(d.keys.length ? html` (you have ${d.keys.length} key${d.keys.length === 1 ? '' : 's'} added: switch to <strong>Auto</strong> to use them)` : '')}.${raw(served)}`
-        : d.provider === 'groq'
-          ? html`Mode: <strong>Groq only</strong> (${d.model}). ${keysText} ${ready ? '' : 'No key can answer right now, so people get the short-break message.'}${raw(served)}`
-          : html`Mode: <strong>Auto</strong>. ${d.keys.length ? `Groq (${d.model}) is answering${ready ? '' : ', but every key is resting, so the local model is answering for now'}. ${keysText}` : 'No Groq key yet, so the local model is answering. Add a key below and Groq starts right away.'}${raw(served)}`;
-    // The last time Groq could not answer (wrong model name, every key resting, Groq down…), so it is never a mystery.
-    const lp = d.lastFallback;
-    const problem = lp && Date.now() - lp.at < 30 * 60_000
-      ? html` <div class="muted small">Last Groq problem (${new Date(lp.at).toLocaleTimeString()}): ${lp.reason}${/does not exist|access|404/i.test(lp.reason) ? ' Choose a model your key can use from the list in the model box.' : ''}</div>`
-      : '';
-    $('#gq-summary', root).insertAdjacentHTML('beforeend', problem);
-    const compact = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n));
-    const modelChip = (m) => {
-      const name = String(m.id).split('/').pop();
-      if (m.state === 'ready') return html`<span class="badge badge-ok" title="${m.id}">${name}</span>`;
-      if (m.gone) return html`<span class="badge badge-bad" title="${m.id}: ${m.lastError || ''}">${name} · not available</span>`;
-      if (m.state === 'cooling') return html`<span class="badge badge-warn" title="${m.id}: ${m.lastError || ''}">${name} · ${cooldownText(m.cooldownMs)}</span>`;
-      return html`<span class="badge badge-bad" title="${m.id}">${name} · off</span>`;
-    };
-    const consoleKeys = d.keys.filter((k) => k.source === 'console');
-    const rows = d.keys.map((k, i) => {
-      // Counted in Redis by both the worker and the gateway, so it matches console.groq.com and survives restarts.
-      const u = k.usage;
-      const perModel = u && u.today.models ? Object.entries(u.today.models).map(([m, v]) => `${m.split('/').pop()}: ${formatNumber(v.calls)} calls, ${compact(v.tokens)}`).join(' · ') : '';
-      const used = u
-        ? html`Today: ${formatNumber(u.today.calls)} calls · ${compact(u.today.tokens)} tokens${u.today.limited ? ` · ${u.today.limited} rate-limited` : ''}${perModel ? html`<div>${perModel}</div>` : ''}<div>30 days: ${formatNumber(u.d30.calls)} calls · ${compact(u.d30.tokens)} tokens</div>`
-        : html`<span>No usage recorded yet</span>`;
-      const ci = consoleKeys.findIndex((x) => x.id === k.id);
-      const move = k.source === 'console' ? html`<button class="btn btn-ghost btn-sm" data-act="up" data-id="${k.id}" ${ci <= 0 ? 'disabled' : ''} aria-label="Move up" title="Higher priority">↑</button><button class="btn btn-ghost btn-sm" data-act="down" data-id="${k.id}" ${ci < 0 || ci >= consoleKeys.length - 1 ? 'disabled' : ''} aria-label="Move down" title="Lower priority">↓</button> ` : '';
-      const remove = k.source === 'console' ? html` <button class="btn btn-ghost btn-sm agenda-del" data-act="remove" data-id="${k.id}" data-label="${k.label}">Remove</button>` : '';
-      const state = k.state === 'disabled' ? html`<span class="badge badge-bad">Rejected by Groq</span>` : '';
-      const org = k.sameOrgAs ? html`<div class="small" style="color: var(--warn)">Same Groq organization as ${k.sameOrgAs}: they share limits, so this adds no extra capacity</div>` : k.org ? html`<div class="muted small">Organization ${k.org}</div>` : '';
-      const why = k.lastError && k.state !== 'ready' ? html`<div class="muted small">${k.lastError}</div>` : '';
-      return html`<tr><td><strong>Account ${k.priority ?? i + 1}: ${k.label}</strong> ${raw(infoButton('groq', k.id))}<div class="muted small">${k.hint} · ${k.source === 'env' ? 'server env' : 'console'}</div>${raw(org)}</td><td>${raw(state)}<div class="chip-group">${raw((k.models || []).map(modelChip).join(''))}</div>${raw(why)}</td><td class="muted small">${raw(used)}</td><td class="actions">${raw(move)}<button class="btn btn-ghost btn-sm" data-act="test" data-id="${k.id}">Test</button>${raw(remove)}</td></tr>`;
-    });
-    $('#gq-keys', root).innerHTML = rows.length
-      ? html`<table class="table"><thead><tr><th>Account (priority order)</th><th>Models</th><th>Usage</th><th></th></tr></thead><tbody>${raw(rows.join(''))}</tbody></table>`
-      : html`<p class="muted small">No keys yet. Add your Groq API key below (you can add several, one per Groq account).</p>`;
-    if (d.unreadable) $('#gq-keys', root).insertAdjacentHTML('beforeend', html`<p class="muted small">${d.unreadable} saved key(s) cannot be read (the server secret changed). Add them again.</p>`);
+    renderAccounts($('#gq-keys', root), d.keys, 'groq', d.unreadable ? `${d.unreadable} saved key(s) cannot be read: add them again.` : 'No Groq key yet.');
+    renderSummary();
   }
+
   async function loadGroq() {
     try {
       if (gq.busyMessage == null) gq.busyMessage = (await api.settings()).settings?.groqBusyMessage ?? '';
@@ -449,29 +429,44 @@ export async function mount(root, { hub }) {
           .catch(() => {});
       }
     } catch (e) {
-      $('#gq-summary', root).textContent = `Could not load the Groq status: ${e.message}`;
+      $('#gq-summary', root).textContent = `Could not load the status: ${e.message}`;
     }
   }
+
   gqForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const body = { llmProvider: gqForm.elements.llmProvider.value, groqModels: gqForm.elements.groqModels.value.trim() || 'openai/gpt-oss-120b', groqStrategy: gqForm.elements.groqStrategy.value || 'priority', groqBusyMessage: gqForm.elements.groqBusyMessage.value.trim() };
+    const el = gqForm.elements;
+    const body = { llmProvider: el.llmProvider.value, groqModels: el.groqModels.value.trim() || 'openai/gpt-oss-120b', groqStrategy: el.groqStrategy.value || 'priority', groqBusyMessage: el.groqBusyMessage.value.trim() };
     if (!body.groqBusyMessage) delete body.groqBusyMessage;
+    if (el.cloudflareModel.value.trim()) body.cloudflareModel = el.cloudflareModel.value.trim();
     try {
       await api.saveSettings(body);
       gq.busyMessage = body.groqBusyMessage ?? gq.busyMessage;
-      toast(body.llmProvider === 'groq' && !gq.data?.keys.length ? 'Saved. Add a Groq key: until then people get the short-break message' : 'AI provider saved', 'success');
+      toast('Saved', 'success');
       await loadGroq();
     } catch (ex) {
       toast(ex.message || 'Could not save', 'error');
     }
   });
+  // the mode is a single choice: apply it as soon as it is picked
+  Array.from(gqForm.elements.llmProvider).forEach((r) => r.addEventListener('change', () => gqForm.requestSubmit()));
+
+  // "+ Add" opens the small form under its list
+  root.addEventListener('click', (e) => {
+    const add = e.target.closest('[data-add]');
+    if (!add) return;
+    const f = $(`#${add.dataset.add}`, root);
+    f.hidden = !f.hidden;
+    if (!f.hidden) f.querySelector('input')?.focus();
+  });
   $('#gq-add', root).addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
     try {
-      const r = await api.groqAddKey(f.label.value.trim(), f.key.value.trim());
-      toast(gq.data?.provider === 'ollama' ? `Key added (${r.models} models). The mode is Local only: choose Auto to use Groq` : `Key added (${r.models} models). Groq is active`, 'success');
+      await api.groqAddKey(f.label.value.trim(), f.key.value.trim());
+      toast('Account added', 'success');
       f.reset();
+      f.hidden = true;
       await loadGroq();
     } catch (ex) {
       toast(ex.message || 'Could not add the key', 'error');
@@ -480,41 +475,30 @@ export async function mount(root, { hub }) {
   $('#gq-keys', root).addEventListener('click', async (e) => {
     const b = e.target.closest('button[data-act]');
     if (!b) return;
+    b.closest('details')?.removeAttribute('open');
     const id = b.dataset.id;
-    if (b.dataset.act === 'test') {
-      b.disabled = true;
-      try {
+    try {
+      if (b.dataset.act === 'test') {
         const r = await api.groqTest(id);
-        toast(r.ok ? `Key works (${r.ms} ms, ${r.models} models)` : r.error || 'The key did not work', r.ok ? 'success' : 'error');
-      } catch (ex) {
-        toast(ex.message, 'error');
-      } finally {
-        b.disabled = false;
-      }
-    } else if (b.dataset.act === 'up' || b.dataset.act === 'down') {
-      try {
+        toast(r.ok ? `Works (${r.ms} ms)` : r.error || 'The key did not work', r.ok ? 'success' : 'error');
+      } else if (b.dataset.act === 'up' || b.dataset.act === 'down') {
         await api.groqMoveKey(String(id).replace(/^db:/, ''), b.dataset.act);
         await loadGroq();
-      } catch (ex) {
-        toast(ex.message, 'error');
-      }
-    } else if (b.dataset.act === 'remove') {
-      const ok = await confirmDialog({ title: 'Remove this key?', message: `“${b.dataset.label}” will be deleted from the server. Other keys keep working.`, confirmText: 'Remove', danger: true });
-      if (!ok) return;
-      try {
+      } else if (b.dataset.act === 'remove') {
+        const ok = await confirmDialog({ title: 'Remove this account?', message: `“${b.dataset.label}” will be deleted from the server.`, confirmText: 'Remove', danger: true });
+        if (!ok) return;
         await api.groqDeleteKey(String(id).replace(/^db:/, ''));
-        toast('Key removed', 'success');
+        toast('Account removed', 'success');
         await loadGroq();
-      } catch (ex) {
-        toast(ex.message, 'error');
       }
+    } catch (ex) {
+      toast(ex.message, 'error');
     }
   });
-  loadGroq();
-  gq.timer = setInterval(loadGroq, 5000); // live key status: who is cooling, who is ready
-  // Cloudflare Workers AI card + the usage-limit panels behind every account's "i" button
-  const cf = mountCloudflare(root, {});
+  const cf = mountCloudflare(root, { modelInput: gqForm.elements.cloudflareModel, onData: renderSummary });
   const limitPanel = installLimitPanel(root, (kind, id) => (kind === 'cloudflare' ? cf.find(id) : gq.data?.keys.find((k) => k.id === id)));
+  loadGroq();
+  gq.timer = setInterval(loadGroq, 5000); // live account status
 
   const offs = [
     hub.on('model:pull', (p) => {

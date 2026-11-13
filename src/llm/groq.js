@@ -133,7 +133,7 @@ export class GroqClient {
     const allowanceMs = this.exhausted?.(res.status, String(detail));
     if (allowanceMs) {
       // the provider's daily free allowance is used up: rest this account until it comes back
-      this.pool.rateLimited(pick.id, { model: pick.model, retryAfterMs: allowanceMs, reason: 'daily free allowance used up', hit: { what: 'daily free allowance', limit: null, used: null } });
+      this.pool.rateLimited(pick.id, { model: pick.model, retryAfterMs: allowanceMs, reason: 'daily free allowance used up', hit: { what: 'daily free allowance', limit: null, used: null }, daily: true });
       throw new GroqUnavailableError(msg, { kind: 'rate_limit', retryAfterMs: allowanceMs });
     }
     if (res.status === 429) {

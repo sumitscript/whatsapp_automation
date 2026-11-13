@@ -69,7 +69,12 @@ step "waiting for gateway health (up to 180 s)"
 for i in $(seq 1 60); do
   if docker compose exec -T gateway curl -fsS http://127.0.0.1:3000/readyz >/dev/null 2>&1; then
     echo "✓ healthy after ~$((i * 3)) s: $APP_IMAGE"
-    docker image prune -f >/dev/null || true
+    # Housekeeping: every deploy leaves the previous image behind. Keep it for 3 days (rollback), drop older unused
+    # images, stopped containers and old build cache. Volumes (database, Redis, WhatsApp session, models) are never touched.
+    docker image prune -af --filter "until=72h" >/dev/null 2>&1 || true
+    docker container prune -f >/dev/null 2>&1 || true
+    docker builder prune -f --filter "until=72h" >/dev/null 2>&1 || true
+    echo "  disk after cleanup: $(df -h . | awk 'NR==2{print $4" free of "$2}')"
     exit 0
   fi
   # Surface a crash loop early instead of waiting out the full timeout.
