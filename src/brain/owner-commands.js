@@ -114,7 +114,8 @@ const KIND_LABEL = { appointment: 'Meeting request', todo: 'Request' };
 export function ownerNotice(item, { timeZone, updated = false, clash = [], blocking = false } = {}) {
   const icon = item.kind === 'appointment' ? '📅' : '📝';
   const head = `${updated ? '✏️ Updated' : icon} ${KIND_LABEL[item.kind] || 'Request'} *#${item.id}* from ${who(item)}`;
-  const lines = [head, `${item.title}`, `🗓 ${whenOf(item, timeZone)}${item.location ? `  ·  📍 ${item.location}` : ''}`];
+  const extra = [item.topic && `📝 ${item.topic}`, item.mode && `${/person/i.test(item.mode) ? '🤝' : /phone|whatsapp/i.test(item.mode) ? '📞' : '💻'} ${item.mode}`, item.location && `📍 ${item.location}`].filter(Boolean);
+  const lines = [head, `${item.title}`, `🗓 ${whenOf(item, timeZone)}`, ...(extra.length ? [extra.join('  ·  ')] : [])];
   if (item.dueText && item.dueText !== whenOf(item, timeZone)) lines.push(`They said: “${item.dueText}”`);
   if (clash.length) lines.push('', ...clash);
   lines.push('', `Reply *ok ${item.id}* to confirm (I'll send ${who(item).split(/\s+/)[0]} the confirmation and an invitation card) or *no ${item.id}* to decline${blocking ? ` (it clashes: *force ${item.id}* confirms it anyway)` : ''}.`, 'You can also reply to this message with just "ok". Send "pending" to see everything waiting, "slots" for your free times.');
@@ -123,7 +124,7 @@ export function ownerNotice(item, { timeZone, updated = false, clash = [], block
 
 export function ownerPendingList(pending, { timeZone }) {
   if (!pending.length) return '✅ Nothing is waiting for you.';
-  const lines = pending.slice(0, 12).map((it) => `*#${it.id}* ${it.kind === 'appointment' ? '📅' : '📝'} ${who(it)}: ${it.title} — ${whenOf(it, timeZone)}${it.location ? ` · ${it.location}` : ''}`);
+  const lines = pending.slice(0, 12).map((it) => `*#${it.id}* ${it.kind === 'appointment' ? '📅' : '📝'} ${who(it)}: ${it.title} — ${whenOf(it, timeZone)}${it.mode ? ` · ${it.mode}` : ''}${it.location ? ` · ${it.location}` : ''}`);
   const more = pending.length > 12 ? `\n…and ${pending.length - 12} more in the console.` : '';
   return `Waiting for you (${pending.length}):\n${lines.join('\n')}${more}\n\nReply "ok <number>" to confirm, "no <number>" to decline, or "ok all".`;
 }

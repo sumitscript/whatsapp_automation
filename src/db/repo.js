@@ -54,7 +54,7 @@ const toAgenda = (r) =>
   r && {
     id: Number(r.id),
     chatId: r.chat_id,
-    contactName: r.contact_name ?? null,
+    contactName: r.display_name ?? r.contact_name ?? null,
     phone: r.contact_phone ?? null,
     kind: r.kind,
     title: r.title,
@@ -63,6 +63,8 @@ const toAgenda = (r) =>
     allDay: r.all_day,
     dueText: r.due_text,
     location: r.location,
+    topic: r.topic ?? null,
+    mode: r.mode ?? null,
     status: r.status,
     source: r.source,
     sourceMessage: r.source_message,
@@ -70,11 +72,11 @@ const toAgenda = (r) =>
     updatedAt: r.updated_at,
   };
 
-const AGENDA_SELECT = `SELECT a.*, c.name AS contact_name, c.phone AS contact_phone
+const AGENDA_SELECT = `SELECT a.*, COALESCE(c.name, a.contact_name) AS display_name, c.phone AS contact_phone
   FROM agenda_items a LEFT JOIN contacts c ON c.chat_id = a.chat_id`;
 const AGENDA_FIELDS = {
   kind: 'kind', title: 'title', details: 'details', dueAt: 'due_at', allDay: 'all_day', dueText: 'due_text',
-  location: 'location', status: 'status', chatId: 'chat_id',
+  location: 'location', topic: 'topic', mode: 'mode', contactName: 'contact_name', status: 'status', chatId: 'chat_id',
 };
 
 const toChat = (r) => ({
@@ -321,9 +323,9 @@ export function createRepo(pool) {
     },
     async createAgendaItem(it) {
       const { rows } = await q(
-        `INSERT INTO agenda_items (chat_id, kind, title, details, due_at, all_day, due_text, location, status, source, source_message)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-        [it.chatId ?? null, it.kind, it.title, it.details ?? null, it.dueAt ?? null, !!it.allDay, it.dueText ?? null, it.location ?? null, it.status || 'pending', it.source || 'ai', it.sourceMessage ?? null],
+        `INSERT INTO agenda_items (chat_id, kind, title, details, due_at, all_day, due_text, location, status, source, source_message, topic, mode, contact_name)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+        [it.chatId ?? null, it.kind, it.title, it.details ?? null, it.dueAt ?? null, !!it.allDay, it.dueText ?? null, it.location ?? null, it.status || 'pending', it.source || 'ai', it.sourceMessage ?? null, it.topic ?? null, it.mode ?? null, it.contactName ?? null],
       );
       return repo.getAgendaItem(rows[0].id);
     },
@@ -384,11 +386,16 @@ export function createRepo(pool) {
     },
 
     // ---------- wipe ----------
-    /** Delete every chat: contacts (with their AI memory notes and block flags), messages, sessions and agenda items. Keeps users, settings and the audit log. */
-    async wipeChatData() {
+    /**
+     * Delete every chat: contacts (with their AI memory notes and block flags), messages and sessions. The agenda is the owner's
+     * own list and stays (each item keeps the contact's name); `agenda: true` removes it too. Keeps users, settings and the audit log.
+     */
+    async wipeChatData({ agenda = false } = {}) {
       const counts = {};
-      for (const t of ['messages', 'sessions', 'agenda_items', 'contacts']) counts[t] = Number((await q(`SELECT count(*) AS n FROM ${t}`)).rows[0].n);
-      await q('TRUNCATE agenda_items, messages, sessions, contacts RESTART IDENTITY');
+      const tables = ['messages', 'sessions', 'contacts', ...(agenda ? ['agenda_items'] : [])];
+      for (const t of tables) counts[t] = Number((await q(`SELECT count(*) AS n FROM ${t}`)).rows[0].n);
+      if (!agenda) await q('UPDATE agenda_items a SET contact_name = c.name FROM contacts c WHERE c.chat_id = a.chat_id AND a.contact_name IS NULL');
+      await q(`TRUNCATE ${agenda ? 'agenda_items, ' : ''}messages, sessions, contacts RESTART IDENTITY`);
       return counts;
     },
 

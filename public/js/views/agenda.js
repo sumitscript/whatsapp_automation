@@ -220,6 +220,8 @@ export async function mount(root, { hub }) {
     const meta = [
       when ? html`<span class="badge ${raw(overdue ? 'badge-bad' : 'badge-ok')}">${when}</span>` : '',
       item.dueText ? html`<span class="muted small">they said: “${item.dueText}”</span>` : '',
+      item.topic ? html`<span class="badge">${item.topic}</span>` : '',
+      item.mode ? html`<span class="badge badge-info">${item.mode}</span>` : '',
       item.location ? html`<span class="agenda-loc small">${item.location}</span>` : '',
     ].filter(Boolean);
     return html`
@@ -353,7 +355,11 @@ export async function mount(root, { hub }) {
           <label class="field"><span>Date and time</span><input name="due" type="${allDay ? 'date' : 'datetime-local'}" aria-label="Date and time" /></label>
         </div>
         <label class="switch-row"><input type="checkbox" class="switch" name="allDay" aria-label="All day (no time)" /><span>All day (no time)</span></label>
-        <label class="field"><span>Location</span><input name="location" type="text" maxlength="200" autocomplete="off" aria-label="Location" /></label>
+        <div class="form-grid">
+          <label class="field"><span>What for</span><input name="topic" type="text" maxlength="120" autocomplete="off" placeholder="Code review" aria-label="What for" /></label>
+          <label class="field"><span>How</span><input name="mode" list="ag-modes" type="text" maxlength="60" autocomplete="off" placeholder="Google Meet" aria-label="How" /><datalist id="ag-modes"><option value="Google Meet"></option><option value="Zoom"></option><option value="Microsoft Teams"></option><option value="WebEx"></option><option value="Phone call"></option><option value="In person"></option></datalist></label>
+        </div>
+        <label class="field"><span>Place</span><input name="location" type="text" maxlength="200" autocomplete="off" aria-label="Place" /></label>
         <label class="field"><span>Details</span><textarea name="details" rows="3" maxlength="2000" aria-label="Details"></textarea></label>
         <p class="form-error" id="ag-err" role="alert" hidden></p>
         <div class="dialog-actions">
@@ -370,6 +376,8 @@ export async function mount(root, { hub }) {
     f.allDay.checked = allDay;
     f.due.value = isoToInput(item?.dueAt, allDay);
     f.location.value = item?.location || '';
+    f.topic.value = item?.topic || '';
+    f.mode.value = item?.mode || '';
     f.details.value = item?.details || '';
     const err = $('#ag-err', dlg);
 
@@ -400,6 +408,8 @@ export async function mount(root, { hub }) {
         dueAt: inputToIso(f.due.value, isAllDay),
         allDay: isAllDay && !!f.due.value,
         location: f.location.value.trim() || null,
+        topic: f.topic.value.trim() || null,
+        mode: f.mode.value.trim() || null,
       };
       const submit = $('button[type="submit"]', dlg);
       submit.disabled = true;

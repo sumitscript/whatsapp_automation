@@ -187,6 +187,8 @@ export function mountCloudflare(root, { modelInput, onData } = {}) {
     if (!d) return;
     if (modelInput && document.activeElement !== modelInput) modelInput.value = d.model || '';
     renderAccounts(list, d.keys, 'cloudflare', 'No Cloudflare account yet.');
+    const af = $('#cf-add', root);
+    if (!d.keys.length && !af.dataset.touched) af.hidden = false; // nothing added yet: show the form right away
     onData?.(d);
   }
   async function load() {

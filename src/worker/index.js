@@ -257,7 +257,7 @@ async function handleJob(job) {
   if (s.agendaEnabled && doneIntent !== 'meeting_unavailable') {
     if (doneMeeting) {
       // The reply already understood the request (time and place): file it now, deterministically.
-      await saveAgendaItems(job.chatId, [meetingDraft({ meeting: doneMeeting, text, contactName: job.contactName })], { text, refinement: looksLikeRefinement(text) }).catch((err) => log.warn('Could not file the meeting request', { chatId: job.chatId, err }));
+      await saveAgendaItems(job.chatId, [meetingDraft({ meeting: doneMeeting, text, contactName: job.contactName })], { text, refinement: looksLikeRefinement(text), contactName: job.contactName }).catch((err) => log.warn('Could not file the meeting request', { chatId: job.chatId, err }));
     } else if (looksLikeCommitmentInContext(text, earlierUserTexts)) {
       queueAgenda(job.chatId, { text, contactName: job.contactName || null, turns: turnsNow.slice(-8), at: Date.now() });
     }
@@ -281,19 +281,19 @@ async function extractAgendaFor(chatId, { text, contactName, turns: snapshot }, 
   const turns = snapshot?.length ? snapshot : await memory.get(chatId);
   const found = await brain.extractAgenda({ turns, text, contactName, settings: s, signal });
   if (!found.length) return log.debug('No agenda items found', { chatId });
-  await saveAgendaItems(chatId, found, { text, refinement: looksLikeRefinement(text) });
+  await saveAgendaItems(chatId, found, { text, refinement: looksLikeRefinement(text), contactName });
 }
 
 // Store items found in a message: a request for the same time (or a refinement of an earlier one) updates the item, anything else is new.
-async function saveAgendaItems(chatId, found, { text, refinement = false }) {
+async function saveAgendaItems(chatId, found, { text, refinement = false, contactName = null }) {
   const existing = await repo.listAgenda({ view: 'open', chatId });
   for (const it of found) {
-    const draft = { ...it, chatId, sourceMessage: String(text).slice(0, 500), source: 'ai' };
+    const draft = { contactName, ...it, chatId, sourceMessage: String(text).slice(0, 500), source: 'ai' };
     const same = existing.find((e) => sameItem(e, draft, { refinement }));
     if (same) {
       // The person is refining an earlier proposal ("make it 6pm"): keep the item, update what changed.
-      const changed = (draft.dueAt && (!same.dueAt || new Date(draft.dueAt).getTime() !== new Date(same.dueAt).getTime())) || (draft.location && draft.location !== same.location) || (draft.title && draft.title !== same.title);
-      const saved = await repo.updateAgendaItem(same.id, { title: draft.title, details: draft.details ?? same.details, dueAt: draft.dueAt ?? same.dueAt, allDay: draft.dueAt ? draft.allDay : same.allDay, dueText: draft.dueText ?? same.dueText, location: draft.location ?? same.location });
+      const changed = (draft.dueAt && (!same.dueAt || new Date(draft.dueAt).getTime() !== new Date(same.dueAt).getTime())) || (draft.location && draft.location !== same.location) || (draft.mode && draft.mode !== same.mode) || (draft.topic && draft.topic !== same.topic) || (draft.title && draft.title !== same.title);
+      const saved = await repo.updateAgendaItem(same.id, { title: draft.title, details: draft.details ?? same.details, dueAt: draft.dueAt ?? same.dueAt, allDay: draft.dueAt ? draft.allDay : same.allDay, dueText: draft.dueText ?? same.dueText, location: draft.location ?? same.location, topic: draft.topic ?? same.topic, mode: draft.mode ?? same.mode, contactName: same.contactName ?? draft.contactName });
       log.info('Agenda item updated', { chatId, id: same.id });
       await bus.publish(TOPICS.outbound, chatId, { type: 'agenda', chatId, itemId: saved.id, created: false, changed: !!changed });
     } else {

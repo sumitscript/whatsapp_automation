@@ -411,6 +411,8 @@ export async function mount(root, { hub }) {
       if (gq.busyMessage != null) gqForm.elements.groqBusyMessage.value = gq.busyMessage;
     }
     renderAccounts($('#gq-keys', root), d.keys, 'groq', d.unreadable ? `${d.unreadable} saved key(s) cannot be read: add them again.` : 'No Groq key yet.');
+    const af = $('#gq-add', root);
+    if (!d.keys.length && !af.dataset.touched) af.hidden = false; // nothing added yet: show the form right away
     renderSummary();
   }
 
@@ -457,6 +459,7 @@ export async function mount(root, { hub }) {
     if (!add) return;
     const f = $(`#${add.dataset.add}`, root);
     f.hidden = !f.hidden;
+    f.dataset.touched = '1';
     if (!f.hidden) f.querySelector('input')?.focus();
   });
   $('#gq-add', root).addEventListener('submit', async (e) => {

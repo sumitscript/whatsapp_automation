@@ -236,7 +236,7 @@ export class Inbox {
     const s = this.settings.get();
     // Same language the contact wrote the request in (Hindi, Gujarati, Marathi, Hinglish; English otherwise).
     const lang = replyLanguage(item.sourceMessage || item.title || '', [], null);
-    const p = { code: lang.code, name: item.contactName, owner: s.ownerName, title: item.title, dueAt: item.dueAt, allDay: item.allDay, place: item.location, timeZone: s.timezone };
+    const p = { code: lang.code, name: item.contactName, owner: s.ownerName, title: item.title, dueAt: item.dueAt, allDay: item.allDay, place: item.location, topic: item.topic, mode: item.mode, timeZone: s.timezone };
     if (status === 'declined') {
       // A declined meeting offers the owner's free times, so the conversation can continue instead of ending.
       let slots = '';
@@ -248,7 +248,7 @@ export class Inbox {
       return { sent: true, card: false };
     }
     // Confirmed before with another time/place? Then this message says "updated", not "confirmed" a second time.
-    const told = `${item.dueAt ? new Date(item.dueAt).toISOString() : ''}|${item.location || ''}`;
+    const told = `${item.dueAt ? new Date(item.dueAt).toISOString() : ''}|${item.location || ''}|${item.mode || ''}`;
     const before = await this.redis.get(keys.agendaTold(item.id)).catch(() => null);
     const text = confirmationText({ ...p, rescheduled: rescheduled || (!!before && before !== told) });
     await this.redis.set(keys.agendaTold(item.id), told, 'EX', 30 * 86_400).catch(() => {});
@@ -411,7 +411,7 @@ export class Inbox {
    * messages, sessions, agenda), the Redis short-term memory / takeover / rate keys, and this process's
    * in-memory per-chat state. Users, settings, the audit log and the knowledge base are kept.
    */
-  async wipeChatData() {
+  async wipeChatData({ agenda = false } = {}) {
     for (const buf of this.pending.values()) clearTimeout(buf.timer);
     for (const chatId of [...this.typing.keys()]) this.#typingStop(chatId, true);
     for (const m of [this.pending, this.recentOut, this.jobs, this.echo, this.lastErrorNotice, this.lastUnsupported]) m.clear(); // EchoTracker has clear() too
@@ -419,7 +419,7 @@ export class Inbox {
     this.selfChat.clear(); // the next account has another own-chat id
     this.selfChatsLoaded = null;
     await this.redis.del(keys.selfChats).catch(() => {});
-    const counts = await this.repo.wipeChatData();
+    const counts = await this.repo.wipeChatData({ agenda });
     let redisKeys = 0;
     for (const pattern of chatKeyPatterns) redisKeys += await deleteKeysMatching(this.redis, pattern);
     this.hub.emit('chats:wiped', {});
@@ -437,7 +437,7 @@ export class Inbox {
     if (!item.chatId) return false;
     const lang = replyLanguage(item.sourceMessage || item.title || '', [], null);
     const s = this.settings.get();
-    const text = confirmationText({ code: lang.code, name: item.contactName, owner: s.ownerName, title: item.title, dueAt: item.dueAt, allDay: item.allDay, place: item.location, timeZone: s.timezone });
+    const text = confirmationText({ code: lang.code, name: item.contactName, owner: s.ownerName, title: item.title, dueAt: item.dueAt, allDay: item.allDay, place: item.location, topic: item.topic, mode: item.mode, timeZone: s.timezone });
     const png = await this.renderInvitation(item, lang.code);
     await this.#sendImageSystem(item.chatId, png, text, 'agenda');
     return true;

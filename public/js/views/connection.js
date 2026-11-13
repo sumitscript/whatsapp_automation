@@ -91,10 +91,10 @@ export async function mount(root, { hub, state }) {
     if (act === 'logout') {
       const { ok, checked } = await confirmDialog({
         title: 'Log out of WhatsApp?',
-        message: 'This unlinks the server from your phone and wipes the saved WhatsApp session. You will need to scan a new QR code. Chats, messages and the AI’s memory of people are stored on this server and stay unless you also delete them below.',
+        message: 'This unlinks the server from your phone and wipes the saved WhatsApp session. You will need to scan a new QR code. Chats, messages and the AI’s memory of people stay on this server unless you delete them below. Your agenda is always kept.',
         confirmText: 'Log out',
         danger: true,
-        option: { label: 'Also delete all chats, messages, agenda and AI memory from this server (cannot be undone)', checked: true },
+        option: { label: 'Also delete all chats, messages and AI memory from this server (cannot be undone)', checked: true },
       });
       if (!ok) return;
       body = { wipeData: checked };

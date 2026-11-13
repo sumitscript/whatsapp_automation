@@ -9,7 +9,7 @@ import { INTENT_PROFILES, isFollowUp, resolveIntent } from './intent.js';
 import { replyLanguage, statedLanguagePreference } from './lang.js';
 import { MessageChunker } from './format.js';
 import { isRepeat, recentBubbles } from './repeat.js';
-import { asksAboutPlans, buildExtractionMessages, guessLocation, guessLocationFromContext, heuristicItem, localParts, isMeetingRequest, isPassOnRequest, meetingKind, mentionsMeeting, parseExtraction, parseWhen, resolveItems, wantsToMeet } from './agenda.js';
+import { asksAboutPlans, buildExtractionMessages, guessLocation, guessLocationFromContext, heuristicItem, localParts, isMeetingRequest, isPassOnRequest, meetingKind, meetingMode, meetingTitle, meetingTopic, mentionsMeeting, parseExtraction, parseWhen, resolveItems, wantsToMeet, zonedToUtc } from './agenda.js';
 import { meetingAck, passOnAck, slotTakenAck } from './invite.js';
 import { slotsText } from './slots.js';
 import { estimateTokens, normalize } from '../rag/text.js';
@@ -198,7 +198,8 @@ export function createBrain({ kb, llm, memory, cache, logger, availability = nul
     // files the request in the Agenda for the owner to confirm.
     // Naming the owner ("I want to meet Sumit at 8") classifies as about_owner and "Hello?" as a greeting, so every
     // intent qualifies except the ones that are clearly something else (code, maths, jokes, stories).
-    if (settings.meetingAck !== false && !['coding', 'creative', 'math', 'joke'].includes(intent) && !asksAboutPlans(text) && text.length <= 400) {
+    const meetingish = isMeetingRequest(text) || wantsToMeet(text);
+    if (settings.meetingAck !== false && !['creative', 'math', 'joke'].includes(intent) && (intent !== 'coding' || (meetingish && !text.includes('```'))) && !asksAboutPlans(text) && text.length <= 400) {
       const tz = settings.timezone || 'Asia/Kolkata';
       let hit = parseWhen(text, { timeZone: tz });
       const before = theirMessages.slice(-3).join('\n');
@@ -207,6 +208,12 @@ export function createBrain({ kb, llm, memory, cache, logger, availability = nul
       const mtgKey = chatId ? `mtg:${chatId}` : null;
       const offered = mtgKey ? await cache.get(mtgKey).catch(() => null) : null;
       const followingOffer = !!offered?.at && Date.now() - offered.at < 30 * 60_000;
+      // "tomorrow on Google Meet" asked for the time; the answer "9 PM" belongs to tomorrow, not to today.
+      if (followingOffer && hit && !hit.hasDay && !hit.allDay && offered.askedDate) {
+        const day = localParts(new Date(offered.askedDate), tz);
+        const t = localParts(hit.dueAt, tz);
+        hit = { ...hit, dueAt: zonedToUtc(day.y, day.m, day.d, t.h, t.mi, tz), hasDay: true };
+      }
       if (followingOffer && hit && !hit.hasDay && offered.slots?.length) {
         const want = localParts(hit.dueAt, tz);
         const same = offered.slots.map((x) => new Date(x)).filter((d) => {
@@ -228,6 +235,8 @@ export function createBrain({ kb, llm, memory, cache, logger, availability = nul
           dueAt: hit?.dueAt,
           allDay: hit?.allDay,
           place: guessLocation(text) || guessLocationFromContext(theirMessages.slice(-3), { timeZone: tz }),
+          topic: meetingTopic(text) || meetingTopic(before),
+          mode: meetingMode(`${before}\n${text}`),
           timeZone: tz,
         });
         // The asked time is taken, blocked, outside working hours or past: say it is not available and offer free slots.
@@ -254,11 +263,11 @@ export function createBrain({ kb, llm, memory, cache, logger, availability = nul
         // Remember that we are waiting for an answer (a time, or a choice among the offered slots); a complete request clears it.
         if (mtgKey && ackIntent !== 'pass_on') {
           const waiting = ackIntent === 'meeting_unavailable' || !hit || hit.allDay;
-          await cache.set(mtgKey, waiting ? { at: Date.now(), slots: offeredNow.map((d) => d.toISOString()) } : { at: 0 }).catch(() => {});
+          await cache.set(mtgKey, waiting ? { at: Date.now(), slots: offeredNow.map((d) => d.toISOString()), askedDate: hit?.allDay && hit.dueAt ? hit.dueAt.toISOString() : offered?.askedDate ?? null } : { at: 0 }).catch(() => {});
         }
         // A complete, free request travels with the reply so the worker files it at once, without the model and without a queue.
         if (ackIntent === 'meeting' && hit && !hit.allDay) {
-          meta.meeting = { dueAt: hit.dueAt.toISOString(), dueText: hit.matched || null, place: guessLocation(text) || guessLocationFromContext(theirMessages.slice(-3), { timeZone: tz }), kind: meetingKind(`${before}\n${text}`) };
+          meta.meeting = { dueAt: hit.dueAt.toISOString(), dueText: hit.matched || null, place: guessLocation(text) || guessLocationFromContext(theirMessages.slice(-3), { timeZone: tz }), kind: meetingKind(`${before}\n${text}`), topic: meetingTopic(text) || meetingTopic(before), mode: meetingMode(`${before}\n${text}`) };
         }
         yield { type: 'chunk', text: ack, index: 0, meta };
         if (chatId) await memory.append(chatId, [{ role: 'user', content: text }, { role: 'assistant', content: ack }]);
@@ -469,16 +478,19 @@ Return ONLY the updated notes.`,
       log?.warn('Agenda extraction failed', { err });
     }
     const userTexts = turns.filter((t) => t.role === 'user').map((t) => t.content);
-    const resolved = items ? resolveItems(items, { text, userTexts, now, timeZone }) : [];
+    const resolved = items ? resolveItems(items, { text, userTexts, now, timeZone, contactName }) : [];
     // A small model often leaves `location` empty even when the message names a place.
     // The place named in the CURRENT message wins; an earlier one is only a fallback (joining them let the older place win).
     const place = guessLocation(text) || guessLocationFromContext(userTexts.slice(-4, -1), { now, timeZone });
     const withPlace = (list) => list.map((it) => (it.location || !place ? it : { ...it, location: place }));
     // A small model sometimes files "Confirm meeting with Aditya" as a to-do: a meeting with a date is an appointment.
-    const first = String(contactName || 'contact').trim().split(/\s+/)[0];
-    const KIND_TITLE = { call: 'Call with', meal: 'Meal with', meet: 'Meet' };
     const ctx = [...userTexts.slice(-3), text].join('\n');
-    const asMeeting = (list) => list.map((it) => (it.kind === 'todo' && it.dueAt && mentionsMeeting(it.title) ? { ...it, kind: 'appointment', title: `${KIND_TITLE[meetingKind(ctx)]} ${first}` } : it));
+    const asMeeting = (list) =>
+      list.map((it) => {
+        if (!(it.kind === 'todo' && it.dueAt && mentionsMeeting(it.title))) return it;
+        const topic = meetingTopic(text) || meetingTopic(ctx);
+        return { ...it, kind: 'appointment', topic, mode: meetingMode(ctx), title: meetingTitle({ kind: meetingKind(ctx), topic, contactName }) };
+      });
     if (resolved.length) return withPlace(asMeeting(resolved));
     // The model failed or found nothing: a plain "let's meet tomorrow at 5" is still worth keeping.
     const h = heuristicItem({ text, contextText: userTexts.slice(-4, -1).join('\n'), contactName, now, timeZone });

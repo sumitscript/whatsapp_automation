@@ -91,14 +91,14 @@ test('meeting reply never agrees, is in their language, and asks for details whe
   const dueAt = new Date('2026-11-11T00:30:00Z');
   const en = meetingAck({ ...base, code: 'en', dueAt, place: 'Railway station' });
   assert.match(en, /Got it Prachi!/);
-  assert.match(en, /Wed, 11 Nov, 6:00 am · 📍 Railway station/);
+  assert.match(en, /Wed, 11 Nov, 6:00 am\n📍 Railway station/);
   assert.match(en, /real Sumit/);
   assert.doesNotMatch(en, /\b(sure|yes|okay|ok|confirmed)\b/i);
-  assert.match(meetingAck({ ...base, code: 'hi-Latn', dueAt }), /asli Sumit tak pahuncha diya jayega/);
+  assert.match(meetingAck({ ...base, code: 'hi-Latn', dueAt }), /asli Sumit tak pahuncha diya/);
   assert.match(meetingAck({ ...base, code: 'hi', dueAt }), /असली Sumit/);
   assert.match(meetingAck({ ...base, code: 'gu', dueAt }), /સાચા Sumit/);
   assert.match(meetingAck({ ...base, code: 'mr', dueAt }), /खऱ्या Sumit/);
-  assert.match(meetingAck({ ...base, code: 'en' }), /Which day, time and place/, 'no time → asks');
+  assert.match(meetingAck({ ...base, code: 'en' }), /When would you like to meet, and how/, 'no time → asks');
   const dateOnly = meetingAck({ ...base, code: 'en', dueAt, allDay: true, place: 'BKC Mumbai' });
   assert.match(dateOnly, /What time works for you?/, 'date only → asks only for the time');
   assert.match(dateOnly, /Wed, 11 Nov/, '…and says what was understood');
@@ -252,7 +252,7 @@ test('pass-on reply: noted, passed on, nothing promised, in their language', () 
   const p = { name: 'Prachi Shah', owner: 'Sumit Soni' };
   const en = passOnAck({ ...p, code: 'en' });
   assert.match(en, /^Noted Prachi!/);
-  assert.match(en, /pass it on to the real Sumit/);
+  assert.match(en, /pass this on to the real Sumit/);
   assert.doesNotMatch(en, /\b(sure|will do|confirmed|yes)\b/i);
   assert.match(passOnAck({ ...p, code: 'hi-Latn' }), /asli Sumit tak pahuncha di jayegi/);
   assert.match(passOnAck({ ...p, code: 'hi' }), /असली Sumit/);
@@ -342,10 +342,10 @@ test('pipeline: "Mujhe aapse milna hai" gets the "which day, time and place?" re
   const hi = await replyTo('Mujhe aapse milna hai');
   assert.equal(hi.calls.length, 0);
   assert.equal(hi.done.meta.intent, 'meeting');
-  assert.match(hi.chunks[0], /Kis din, kitne baje aur kahan milna hai/);
+  assert.match(hi.chunks[0], /Kab milna hai, aur kaise: Google Meet, call ya in person/);
   const en = await replyTo('I want to meet you');
   assert.equal(en.calls.length, 0);
-  assert.match(en.chunks[0], /Which day, time and place/);
+  assert.match(en.chunks[0], /When would you like to meet, and how/);
   assert.equal((await replyTo('nice to meet you')).calls.length, 1, 'small talk still goes to the model');
   assert.equal((await replyTo('Mujhe aapse milna hai', { settingsOver: { meetingAck: false } })).calls.length, 1);
 });
@@ -379,4 +379,89 @@ test('"Tell him hi for me" never lends its words as a place; a meeting message d
   assert.equal(guessLocation('Schedule a meet with him for 10am tomorrow regarding a prospectus client'), null);
   assert.equal(guessLocationFromContext(['Tell him hi for me'], { now: NOW, timeZone: TZ }), null);
   assert.equal(guessLocationFromContext(['hello', 'I want to meet her at bkc mumbai', 'ok'], { now: NOW, timeZone: TZ }), 'Bkc mumbai');
+});
+
+// ------------------------------------------------------------------ what / how, typos, the date that was asked
+
+test('a meeting names its platform and its purpose: Google Meet, WebEx, in person, "code review"', async () => {
+  const { meetingMode, meetingTopic, meetingTitle } = await import('../src/brain/agenda.js');
+  assert.equal(meetingMode('Can i have a meeting with sumit tommorow on google meet'), 'Google Meet');
+  assert.equal(meetingMode('I want on 20tth nov for code review on WebEx'), 'WebEx');
+  assert.equal(meetingMode("let's do it in person"), 'In person');
+  assert.equal(meetingMode('a phone call tomorrow'), 'Phone call');
+  assert.equal(meetingMode('see you tomorrow at 5'), null);
+  assert.equal(meetingTopic('I want on 20tth nov for code review on WebEx'), 'Code review');
+  assert.equal(meetingTopic('lets meet on 22 nov 4pm in person for project discussion'), 'Project discussion');
+  assert.equal(meetingTopic('can we meet tomorrow'), null);
+  assert.equal(meetingTitle({ topic: 'Code review', contactName: 'Sugam Sharma' }), 'Code review with Sugam');
+  assert.equal(meetingTitle({ contactName: 'Sugam Sharma' }), 'Meet Sugam');
+});
+
+test('typos people really make are read: "20tth nov", "14 noc 9 0m", "I wany to meet Sumit"', async () => {
+  const { parseWhen, wantsToMeet, isMeetingRequest, normalizeTimeText } = await import('../src/brain/agenda.js');
+  const now = new Date('2026-11-13T09:00:00Z');
+  assert.equal(parseWhen('I want on 20tth nov for code review', { now })?.dueAt.toISOString().slice(0, 10), '2026-11-20');
+  const t = parseWhen('14 noc 9 0m', { now });
+  assert.equal(t.dueAt.toISOString(), '2026-11-14T15:30:00.000Z'); // 9 pm IST
+  assert.ok(wantsToMeet('I wany to meet Sumit'));
+  assert.ok(isMeetingRequest('I want on 20tth nov for code review on WebEx'));
+  assert.equal(isMeetingRequest('what is the capital of france'), false);
+  assert.match(normalizeTimeText('I will not 5 now 6'), /not 5 now 6/, 'real words are not turned into months');
+});
+
+test('a place must come from the person\'s words, never from one of our own replies', async () => {
+  const { placeFromTheirWords } = await import('../src/brain/agenda.js');
+  assert.equal(placeFromTheirWords('Asli Sumit tak pahuncha diya jayega', ['meeting tomorrow on google meet']), null);
+  assert.equal(placeFromTheirWords('Railway station', ['meet me at the railway station at 6']), 'Railway station');
+  assert.equal(placeFromTheirWords('Sayaji Garden', ['meet tomorrow']), null, 'invented by the model');
+});
+
+test('the reply to a meeting request shows what and how, and asks how when it is not said', async () => {
+  const { meetingAck } = await import('../src/brain/invite.js');
+  const base = { code: 'en', name: 'Sugam Sharma', owner: 'Sumit Soni', dueAt: new Date('2026-11-20T15:30:00Z'), allDay: false, timeZone: 'Asia/Kolkata' };
+  const ack = meetingAck({ ...base, topic: 'Code review', mode: 'WebEx' });
+  assert.match(ack, /Fri, 20 Nov, 9:00 pm\n📝 Code review · 💻 WebEx/);
+  const askTime = meetingAck({ ...base, allDay: true });
+  assert.match(askTime, /What time works for you\? And how: Google Meet, a call or in person\?/);
+  assert.doesNotMatch(meetingAck({ ...base, allDay: true, mode: 'Google Meet' }), /And how/, 'already said');
+});
+
+test('a clear English sentence is answered in English even when an old note says "Prefers Hinglish"; short words still follow the note', async () => {
+  const { replyLanguage } = await import('../src/brain/lang.js');
+  const notes = '- Name: Sugam\n- Prefers Hinglish';
+  assert.equal(replyLanguage('Can i have a meeting with sumit tomorrow on google meet', [], notes).code, 'en');
+  assert.equal(replyLanguage('Tell me about your Projects', [], notes).code, 'en');
+  assert.equal(replyLanguage('ok', [], notes).code, 'hi-Latn');
+  assert.equal(replyLanguage('can you help', ['I prefer hinglish'], '').code, 'hi-Latn', 'said in this chat: kept');
+});
+
+test('pipeline: "meeting tomorrow on google meet" then just "9 PM" books tomorrow 9 pm on Google Meet, in English, and the done-meta carries what/how', async () => {
+  await kb.load().catch(() => {});
+  const calls = [];
+  const llm = { numCtx: 4096, async *chat(req) { calls.push(req); yield { type: 'token', text: 'MODEL REPLY' }; yield { type: 'done', stats: {} }; } };
+  const { memory, cache } = createMemoryStores();
+  const brain = createBrain({ kb, llm, memory, cache });
+  const send = async (text) => {
+    const chunks = [];
+    let done;
+    for await (const ev of brain.respond({ chatId: 'gm', text, settings: { ...settings, timezone: 'Asia/Kolkata' }, contactName: 'Banjesh Patel', longTermMemory: '- Prefers Hinglish' })) {
+      if (ev.type === 'chunk') chunks.push(ev.text);
+      else if (ev.type === 'done') done = ev;
+    }
+    await memory.append('gm', [{ role: 'user', content: text }, { role: 'assistant', content: chunks.join('\n') }]);
+    return { chunks, done };
+  };
+  const first = await send('Can i have a meeting with sumit tomorrow on google meet');
+  assert.match(first.chunks[0], /^Noted Banjesh!/, 'English message, English reply, even though the notes say Hinglish');
+  assert.match(first.chunks[0], /Google Meet/);
+  assert.match(first.chunks[0], /What time works for you\?/);
+  assert.doesNotMatch(first.chunks[0], /And how/, 'it already said Google Meet');
+  const second = await send('9 PM');
+  assert.equal(calls.length, 0, 'no model call for either');
+  const m = second.done.meta.meeting;
+  const day = (iso) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(iso));
+  const tomorrow = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(Date.now() + 86_400_000));
+  assert.equal(day(m.dueAt), tomorrow, 'the day that was asked about, not today');
+  assert.equal(new Date(m.dueAt).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }), '21:00');
+  assert.equal(m.mode, 'Google Meet');
 });

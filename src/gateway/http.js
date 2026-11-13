@@ -120,7 +120,7 @@ export function createApp(deps) {
       // agenda live in this server's own databases and stay unless the caller asks for them to go (wipeData: true).
       let wiped = null;
       if (action === 'logout' && req.body?.wipeData === true) {
-        wiped = await inbox.wipeChatData();
+        wiped = await inbox.wipeChatData({ agenda: req.body?.wipeAgenda === true });
         audit(req, 'data.wipe', wiped);
       }
       res.json({ ok: true, state: status.state, wiped });
@@ -364,7 +364,7 @@ export function createApp(deps) {
     const secret = `${accountId}:${token}`;
     if (!isCloudflareKeyFormat(secret)) throw httpError(400, 'Enter the 32-character Cloudflare account id and the API token (Workers AI permission)');
     if (cfDeps.pool.status().some((k) => cfDeps.pool.secretOf(k.id) === secret)) throw httpError(409, 'That key is already added');
-    const check = await probeCloudflare(secret, { baseUrl: config.cloudflare.baseUrl, model: settings.get().cloudflareModel });
+    const check = await probeCloudflare(secret, { baseUrl: config.cloudflare.baseUrl });
     if (!check.ok) throw httpError(400, check.error || 'Cloudflare did not accept this key');
     const row = await repo.addLlmKey({ provider: 'cloudflare', label: label || `cloudflare ${cfDeps.pool.size + 1}`, keyEnc: encryptSecret(secret, config.auth.jwtSecret), hint: maskKey(token) });
     audit(req, 'llm.key.add', { id: row.id, label: row.label, provider: 'cloudflare' });
@@ -390,7 +390,7 @@ export function createApp(deps) {
   api.post('/llm/cloudflare/test', async (req, res) => {
     const secret = cfDeps.pool.secretOf(String(req.body?.id || ''));
     if (!secret) throw httpError(404, 'Key not found');
-    const r = await probeCloudflare(secret, { baseUrl: config.cloudflare.baseUrl, model: settings.get().cloudflareModel });
+    const r = await probeCloudflare(secret, { baseUrl: config.cloudflare.baseUrl });
     res.json({ ok: r.ok, ms: r.ms, status: r.status, note: r.note ?? null, error: r.error ?? null });
   });
 

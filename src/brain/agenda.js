@@ -154,6 +154,19 @@ function foldDayWords(s) {
  * "५ बजे", "5 to 6pm", "1730 hrs". Lower-cases and rewrites those into the digit forms the date reader
  * understands, folding Devanagari/Gujarati words and digits into the same Latin tokens first.
  */
+const MONTH_ABBR = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const NOT_A_MONTH_TYPO = new Set(['now', 'not', 'for', 'the', 'and', 'add', 'via', 'one', 'two', 'six', 'ten', 'day', 'new', 'old', 'any', 'all', 'but', 'you', 'her', 'his', 'out', 'off', 'min', 'hrs', 'bye', 'yes', 'pls', 'plz', 'ok', 'tmrw']);
+/** "noc" / "nob" / "nov." → "nov": a three-letter word one typo away from a month (only used right after a day number and before a time). */
+function fixMonth(word) {
+  if (MONTH_ABBR.includes(word) || NOT_A_MONTH_TYPO.has(word)) return null;
+  const near = (a, b) => {
+    let diff = 0;
+    for (let i = 0; i < 3; i++) if (a[i] !== b[i]) diff++;
+    return diff <= 1;
+  };
+  return MONTH_ABBR.find((m) => near(word, m)) || null;
+}
+
 export function normalizeTimeText(text) {
   let s = String(text ?? '')
     .toLowerCase()
@@ -174,6 +187,13 @@ export function normalizeTimeText(text) {
     .replace(/\bpaune\s+(\d{1,2})\b/g, (_, n) => `${(+n + 11) % 12 || 12}:45`)
     .replace(/\bdedh(?=\s*baje)/g, '1:30')
     .replace(/\bdhai(?=\s*baje)/g, '2:30')
+    // typed too fast: "20tth nov" -> 20th, "9 0m" -> 9pm
+    .replace(/\b(\d{1,2})\s?(?:tth|thh|nth|rth)\b/g, '$1th')
+    .replace(/\b(1[0-2]|[1-9])\s*0m\b/g, '$1pm')
+    .replace(/\b(\d{1,2})(st|nd|rd|th)?\s+([a-z]{3})\b(?=\s+\d)/g, (m, d, suf, w) => {
+      const fixed = fixMonth(w);
+      return fixed ? `${d}${suf || ''} ${fixed}` : m;
+    })
     // "9 p m", "9 p.m." -> 9pm. A full stop right after it ("9 p m.At the cafe") is a sentence break: keep a space so
     // the next word is not glued on ("9pmat").
     .replace(/(\d)\s*([ap])\s?\.?\s?m\b(\.?)/g, (_, d, ap, dot) => `${d}${ap}m${dot ? ' ' : ''}`)
@@ -405,7 +425,7 @@ function explicitDate(today, d, m, y) {
 
 // All gates run on normalizeTimeText(): lower-cased, with Hindi/Marathi/Gujarati words and digits folded to Latin tokens.
 const MEET =
-  /\b(meet|meeting|meetup|catch ?up|call|calling|lunch|dinner|breakfast|brunch|coffee|visit|appointment|schedule[d]?|reschedule|interview|demo|discussion|sync|session|hangout|come over|coming|get together|milte|milenge|milna|milein|milunga|mil sakte|mil lete|mulakat|bulana|aana|aaunga|aaungi|aaoge|baat karni|baat karte|call karna|call karo|phone karna|phone karo|malishu|malvu|bhetu|ghar aana|fix (?:a |the |me a )?(?:date|time|slot)|date fix|time fix|book (?:a |the |me a )?(?:slot|time|date|meeting|appointment)|set up (?:a )?(?:meeting|call|appointment))\b/i;
+  /\b(meet|meeting|meetup|catch ?up|call|calling|lunch|dinner|breakfast|brunch|coffee|visit|appointment|schedule[d]?|reschedule|interview|demo|discussion|sync|session|hangout|come over|coming|get together|milte|milenge|milna|milein|milunga|mil sakte|mil lete|code review|design review|review session|walkthrough|webex|zoom (?:call|meeting)|google ?meet|gmeet|video call|ms teams|teams (?:call|meeting)|mulakat|bulana|aana|aaunga|aaungi|aaoge|baat karni|baat karte|call karna|call karo|phone karna|phone karo|malishu|malvu|bhetu|ghar aana|fix (?:a |the |me a )?(?:date|time|slot)|date fix|time fix|book (?:a |the |me a )?(?:slot|time|date|meeting|appointment)|set up (?:a )?(?:meeting|call|appointment))\b/i;
 const TODO =
   /\b(remind(?:er)?|remember to|don'?t forget|dont forget|todo|to-do|deadline|due (?:on|by|date)|submit|send me|share (?:the|your|it)|follow ?up|call ?back|yaad dil\w*|yaad rakh\w*)\b/i;
 const STRONG_TIME =
@@ -499,7 +519,7 @@ export function mentionsMeeting(text) {
 // meeting but names no time. The twin answers with the "which day, time and place?" template instead of the model
 // (a 3B model replied "Mujhe bhi tumse milna hai. Kaisi jagah ho rahi thi?"). "Nice to meet you" does not count.
 const WANTS_TO_MEET = [
-  /\b(?:i|we|id|i'd)\s*(?:would\s+|really\s+|just\s+|urgently\s+|do\s+)*(?:want|wanna|need|have|like|wish|hope)\s+(?:to\s+)?(?:meet|catch\s*up|see\s+(?:you|him|her|them)|talk\s+(?:to|with)\s+(?:you|him|her|them)|speak\s+(?:to|with)\s+(?:you|him|her|them))\b/,
+  /\b(?:i|we|id|i'd)\s*(?:would\s+|really\s+|just\s+|urgently\s+|do\s+)*(?:want|wanna|wany|wnt|wan|need|have|like|wish|hope)\s+(?:to\s+)?(?:meet|catch\s*up|see\s+(?:you|him|her|them)|talk\s+(?:to|with)\s+(?:you|him|her|them)|speak\s+(?:to|with)\s+(?:you|him|her|them))\b/,
   /\b(?:wanna|want\s+to|need\s+to)\s+meet\b/,
   /\bmil(?:na|ne|unga|ungi)\s+(?:hai|tha|thi|chahta|chahti|chahte|ka\s+man|ka\s+mann|ki\s+iccha)\b/,
   /\b(?:mujhe|mereko|mujhko|hume|humein)\b[^.?!]{0,30}\bmil(?:na|ne|unga|ungi)\b/,
@@ -523,6 +543,60 @@ export function meetingKind(text) {
 }
 
 const KIND_TITLE = { call: 'Call with', meal: 'Meal with', meet: 'Meet' };
+
+// How the meeting happens: a video platform, a phone call, in person. Read from the person's own words.
+const MODES = [
+  [/\b(?:google ?meet|g ?meet|gmeet|meet\.google(?:\.com)?)\b/, 'Google Meet'],
+  [/\bzoom\b/, 'Zoom'],
+  [/\b(?:ms teams|microsoft teams|teams (?:call|meeting|link)|on teams)\b/, 'Microsoft Teams'],
+  [/\bwebex\b/, 'WebEx'],
+  [/\bskype\b/, 'Skype'],
+  [/\bslack huddle\b/, 'Slack huddle'],
+  [/\bwhats ?app (?:video |voice )?call\b/, 'WhatsApp call'],
+  [/\bvideo (?:call|meeting|chat)\b/, 'Video call'],
+  [/\b(?:phone|voice) call\b|\bon (?:the )?phone\b|\bcall karna\b|\bphone karna\b/, 'Phone call'],
+  [/\bin[ -]?person\b|\bface[ -]?to[ -]?face\b|\boffline\b|\bphysically\b|\bsaamne\b|\bo?ffice mein\b/, 'In person'],
+  [/\b(?:online|virtual(?:ly)?|remote(?:ly)?)\b/, 'Online'],
+];
+/** "on Google Meet", "WebEx", "in person", "phone call", "online" → the label, or null. */
+export function meetingMode(text) {
+  const s = normalizeTimeText(text);
+  for (const [re, label] of MODES) if (re.test(s)) return label;
+  return null;
+}
+
+// What the meeting is for: "code review", "interview", or whatever follows "for / about / regarding / to discuss".
+const TOPIC_WORDS = /\b(code review|design review|project review|interview|demo|discussion|brainstorm(?:ing)?|catch ?up|stand ?up|sync(?: up)?|mentoring|mentorship|consultation|walkthrough|training|presentation|pitch|one on one|1 ?on ?1|collaboration|feedback session|planning)\b/;
+const TOPIC_FOR = /\b(?:for|about|regarding|to discuss|to talk about|discussing|related to)\s+(?:a\s+|an\s+|the\s+|my\s+|our\s+)?([a-z][a-z0-9&+'’ -]{2,48}?)(?=\s+(?:on|at|via|over|using|tomorrow|today|tonight|next|this|in|by|from|with|around|google|zoom|webex|teams|skype)\b|\s+\d|[,.;!?\n]|$)/;
+const NOT_TOPIC = new Set(['meeting', 'call', 'chat', 'me', 'you', 'us', 'him', 'her', 'them', 'it', 'this', 'that', 'a', 'an', 'the', 'tomorrow', 'today', 'tonight', 'later', 'now', 'sumit', 'time', 'date', 'slot', 'day', 'week', 'weekend', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'online', 'offline', 'a meeting', 'meet', 'talk', 'something', 'sometime']);
+export function meetingTopic(text) {
+  const s = normalizeTimeText(text);
+  const f = TOPIC_FOR.exec(s);
+  if (f) {
+    const t = f[1].trim().replace(/\s+/g, ' ');
+    const words = t.split(' ');
+    if (!NOT_TOPIC.has(t) && !words.every((w) => NOT_TOPIC.has(w) || /^\d/.test(w)) && !MODES.some(([re]) => re.test(t))) return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  const w = TOPIC_WORDS.exec(s);
+  return w ? w[1].charAt(0).toUpperCase() + w[1].slice(1) : null;
+}
+
+/** "Code review with Sugam", "Meet Aditya", "Call with Riya". */
+export function meetingTitle({ kind = 'meet', topic = null, contactName }) {
+  const who = String(contactName || 'contact').trim().split(/\s+/)[0] || 'contact';
+  return topic ? `${topic} with ${who}` : `${KIND_TITLE[kind] || KIND_TITLE.meet} ${who}`;
+}
+
+// The model sometimes files the bot's own sentence as the place ("Asli Sumit tak pahuncha diya jayega"). A place must come from what the
+// person wrote and must not read like one of our replies.
+const BOT_PHRASE = /pahuncha|passed? (?:it )?on|pass (?:it )?on|confirm|noted|note kar|will (?:let|inform)|real \w+|asli \w+|sumit tak|\bai\b|twin/i;
+export function placeFromTheirWords(place, theirTexts) {
+  if (!place || BOT_PHRASE.test(place)) return null;
+  const said = normalizeTimeText(theirTexts.join(' '));
+  const words = normalizeTimeText(place).split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3);
+  if (!words.length) return null;
+  return words.filter((w) => said.includes(w)).length / words.length >= 0.6 ? place : null;
+}
 
 // ---------------------------------------------------------------- extraction
 
@@ -584,18 +658,21 @@ export function parseExtraction(raw) {
  * then the latest message, then the last few user messages together (a
  * "yes, 5pm works" reply borrows "tomorrow" from the previous turn).
  */
-export function resolveItems(items, { text, userTexts = [], now = new Date(), timeZone = 'Asia/Kolkata' }) {
+export function resolveItems(items, { text, userTexts = [], now = new Date(), timeZone = 'Asia/Kolkata', contactName = null }) {
   const opts = { now, timeZone };
   return items.map((it) => {
     // Prefer a reading that names a day; a bare time ("yes 5pm works") borrows the day from earlier turns.
     const tries = [it.when && parseWhen(it.when, opts), parseWhen(text, opts), parseWhen([...userTexts.slice(-3), text].join('\n'), opts)].filter(Boolean);
     const hit = tries.find((t) => t.hasDay) || tries[0];
-    return {
-      ...it,
-      dueAt: hit?.dueAt ?? null,
-      allDay: hit?.allDay ?? false,
-      dueText: it.when || hit?.matched || null,
-    };
+    const theirs = [...userTexts.slice(-4), text];
+    const place = placeFromTheirWords(it.location, theirs) || guessLocation(text) || guessLocationFromContext(userTexts.slice(-4), opts);
+    const out = { ...it, dueAt: hit?.dueAt ?? null, allDay: hit?.allDay ?? false, dueText: it.when || hit?.matched || null, location: place };
+    if (it.kind === 'appointment') {
+      out.mode = meetingMode(theirs.join('\n'));
+      out.topic = meetingTopic(text) || meetingTopic(userTexts.slice(-3).join('\n'));
+      out.title = meetingTitle({ kind: meetingKind(theirs.join('\n')), topic: out.topic, contactName });
+    }
+    return out;
   });
 }
 
@@ -607,7 +684,8 @@ export function heuristicItem({ text, contextText = '', contactName, now = new D
   if (!hit && !TODO.test(norm)) return null;
   if (meet && hit) {
     const kind = meetingKind(`${contextText}\n${text}`);
-    return { kind: 'appointment', title: `${KIND_TITLE[kind]} ${firstName(contactName || 'contact')}`, details: clip(text.trim(), 300), when: hit.matched, dueAt: hit.dueAt, allDay: hit.allDay, dueText: hit.matched, location: guessLocation(text) };
+    const topic = meetingTopic(text) || meetingTopic(contextText);
+    return { kind: 'appointment', title: meetingTitle({ kind, topic, contactName }), details: clip(text.trim(), 300), when: hit.matched, dueAt: hit.dueAt, allDay: hit.allDay, dueText: hit.matched, location: guessLocation(text), mode: meetingMode(`${contextText}\n${text}`), topic };
   }
   return { kind: 'todo', title: clip(text.trim(), 80), details: null, when: hit?.matched ?? null, dueAt: hit?.dueAt ?? null, allDay: hit?.allDay ?? false, dueText: hit?.matched ?? null, location: null };
 }
@@ -648,12 +726,15 @@ export const looksLikeRefinement = (text) => REFINEMENT.test(String(text ?? ''))
 export function meetingDraft({ meeting, text, contactName }) {
   return {
     kind: 'appointment',
-    title: `${KIND_TITLE[meeting.kind] || KIND_TITLE.meet} ${firstName(contactName || 'contact')}`,
+    title: meetingTitle({ kind: meeting.kind, topic: meeting.topic, contactName }),
     details: clip(String(text ?? '').trim(), 300) || null,
     dueAt: new Date(meeting.dueAt),
     allDay: false,
     dueText: meeting.dueText || null,
     location: meeting.place || null,
+    mode: meeting.mode || null,
+    topic: meeting.topic || null,
+    contactName: contactName || null,
   };
 }
 
@@ -683,6 +764,8 @@ export function sanitizeAgendaInput(body, { partial = false } = {}) {
   text('title', 200, { required: true });
   text('details', 1000);
   text('location', 200);
+  text('topic', 120);
+  text('mode', 60);
   if (has('kind')) KINDS.includes(b.kind) ? (value.kind = b.kind) : errors.push(`kind must be one of ${KINDS.join(', ')}`);
   else if (!partial) value.kind = 'todo';
   if (has('status')) STATUSES.includes(b.status) ? (value.status = b.status) : errors.push(`status must be one of ${STATUSES.join(', ')}`);

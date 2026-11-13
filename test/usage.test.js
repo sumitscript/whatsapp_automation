@@ -114,7 +114,7 @@ test('the instruction beats a "Prefers Hinglish" note; plain English for a few m
   assert.equal(replyLanguage('Talk to me in English', ['Where taj mahal is located'], notes).code, 'en');
   assert.equal(replyLanguage('Where is the Eiffel tower', ['Talk to me in English'], notes).code, 'en', 'and it stays English afterwards');
   // fresh chat: the remembered preference still applies to the first message…
-  assert.equal(replyLanguage('Where taj mahal is located', [], notes).code, 'hi-Latn');
+  assert.equal(replyLanguage('taj mahal where', [], notes).code, 'hi-Latn');
   // …but not after the person has written English twice in a row
   assert.equal(replyLanguage('what is the capital of France', ['Where taj mahal is located today', 'tell me about the history of india'], notes).code, 'en');
   // an explicit preference said in this chat is never outgrown

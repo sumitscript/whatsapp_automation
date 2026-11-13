@@ -20,7 +20,7 @@ const LOCALE = { en: 'en-IN', hl: 'en-IN', hi: 'hi-IN', mr: 'mr-IN', gu: 'gu-IN'
 
 const KIND_LABEL = {
   en: { call: 'Call request', meal: 'Meal plan', meet: 'Meeting request' },
-  hl: { call: 'Call ki request', meal: 'Khaane ka plan', meet: 'Meeting ki request' },
+  hl: { call: 'Call request', meal: 'Khaane ka plan', meet: 'Meeting request' },
   hi: { call: 'कॉल का अनुरोध', meal: 'भोजन की योजना', meet: 'मीटिंग का अनुरोध' },
   mr: { call: 'कॉलची विनंती', meal: 'जेवणाचा बेत', meet: 'मीटिंगची विनंती' },
   gu: { call: 'કોલની વિનંતી', meal: 'જમવાનો પ્લાન', meet: 'મીટિંગની વિનંતી' },
@@ -28,10 +28,11 @@ const KIND_LABEL = {
 
 const TEXT = {
   en: {
-    ack: "Got it {name}! 📅 {what}: {when}{place}\nI can't confirm anything for {owner} myself, so I've noted it and will pass it to the real {owner}. {owner} will confirm soon ✅",
-    passOn: "Noted {name}! I can't act on this myself, so I'll pass it on to the real {owner}. {owner} will see it soon ✅",
-    ask: "Noted {name}! Which day, time and place did you have in mind? I'll pass it to the real {owner} to confirm.",
-    askTime: "Noted {name}! {what}: {when}{place}\nWhat time works for you? I'll pass it to the real {owner} to confirm.",
+    ack: "Got it {name}! 📅 {what}: {when}{place}\nNoted and passed to the real {owner}, who will confirm shortly ✅",
+    passOn: "Noted {name}! I'll pass this on to the real {owner}, who will see it soon ✅",
+    ask: "Noted {name}! When would you like to meet, and how: Google Meet, a call or in person? The real {owner} will confirm.",
+    askTime: "Noted {name}! 📅 {what}: {when}{place}\nWhat time works for you?{howAsk}",
+    howAsk: ' And how: Google Meet, a call or in person?',
     busy: "Sorry {name}, {owner} isn't available then ({when}).\nFree slots: {slots}\nReply with one that suits you, or suggest another time.",
     busyNone: "Sorry {name}, {owner} isn't available then ({when}). Please suggest another time.",
     confirmHead: '✅ Confirmed, {name}! {owner} has accepted: {title}',
@@ -40,10 +41,11 @@ const TEXT = {
     decline: "Hey {name}, {owner} can't make this one ({title}, {when}). Feel free to suggest another time 🙏",
   },
   hl: {
-    ack: 'Theek hai {name}! 📅 {what}: {when}{place}\nIse note kar liya hai aur asli {owner} tak pahuncha diya jayega. {owner} khud confirm karenge ✅',
-    passOn: 'Note kar liya {name}! Yeh baat asli {owner} tak pahuncha di jayegi. {owner} jald dekh lenge ✅',
-    ask: 'Note kar liya {name}! Kis din, kitne baje aur kahan milna hai? Asli {owner} tak pahuncha diya jayega, {owner} confirm karenge.',
-    askTime: 'Note kar liya {name}! {what}: {when}{place}\nKitne baje ka time theek rahega? Asli {owner} tak pahuncha diya jayega, {owner} confirm karenge.',
+    ack: 'Theek hai {name}! 📅 {what}: {when}{place}\nNote kar liya aur asli {owner} tak pahuncha diya hai. {owner} jald confirm karenge ✅',
+    passOn: 'Note kar liya {name}! Yeh baat asli {owner} tak pahuncha di jayegi ✅',
+    ask: 'Note kar liya {name}! Kab milna hai, aur kaise: Google Meet, call ya in person? Asli {owner} confirm karenge.',
+    askTime: 'Note kar liya {name}! 📅 {what}: {when}{place}\nKitne baje ka time theek rahega?{howAsk}',
+    howAsk: ' Aur kaise: Google Meet, call ya in person?',
     busy: 'Sorry {name}, {owner} us time free nahi hain ({when}).\nFree slots: {slots}\nIn mein se koi chun lo, ya koi aur time batao.',
     busyNone: 'Sorry {name}, {owner} us time free nahi hain ({when}). Koi aur time batao.',
     confirmHead: '✅ Confirm ho gaya, {name}! {owner} ne haan kar di hai: {title}',
@@ -102,7 +104,13 @@ export function whenLabel(date, timeZone, allDay, code = 'en') {
   return new Intl.DateTimeFormat(LOCALE[inviteFamily(code)] || 'en-IN', opts).format(d);
 }
 
-function vars({ code, name, owner, kind = 'meet', dueAt, allDay, place, title, timeZone }) {
+/** 💻 for a video platform, 📞 for a call, 🤝 in person. */
+export const modeIcon = (mode) => (/person|office|offline/i.test(mode || '') ? '🤝' : /phone|whatsapp|voice/i.test(mode || '') ? '📞' : '💻');
+
+/** "📝 Code review · 💻 WebEx · 📍 Railway station", whichever of the three are known. */
+export const detailLine = ({ topic, mode, place }) => [topic && `📝 ${topic}`, mode && `${modeIcon(mode)} ${mode}`, place && `📍 ${place}`].filter(Boolean).join(' · ');
+
+function vars({ code, name, owner, kind = 'meet', dueAt, allDay, place, topic, mode, title, timeZone }) {
   const fam = inviteFamily(code);
   return {
     fam,
@@ -111,7 +119,8 @@ function vars({ code, name, owner, kind = 'meet', dueAt, allDay, place, title, t
       owner: first(owner, 'the owner'),
       what: KIND_LABEL[fam][kind] || KIND_LABEL[fam].meet,
       when: whenLabel(dueAt, timeZone, allDay, code),
-      place: place ? ` · 📍 ${place}` : '',
+      place: detailLine({ topic, mode, place }) ? `\n${detailLine({ topic, mode, place })}` : '',
+      howAsk: mode || place ? '' : TEXT[fam].howAsk || '',
       title: title || '',
     },
   };
@@ -150,7 +159,8 @@ export function confirmationText(p) {
   // `rescheduled`: the owner already confirmed this and the time/place changed since: say "updated", not "confirmed" again.
   const lines = [fill(TEXT[fam][p.rescheduled ? 'updatedHead' : 'confirmHead'], v)];
   if (v.when) lines.push(`🗓 ${v.when}`);
-  if (p.place) lines.push(`📍 ${p.place}`);
+  const extra = detailLine({ topic: p.topic, mode: p.mode, place: p.place });
+  if (extra) lines.push(extra);
   lines.push(TEXT[fam].confirmTail);
   return lines.join('\n');
 }
@@ -167,11 +177,11 @@ export function declineText(p) {
 // ------------------------------------------------------------------- the card
 
 const CARD_LABELS = {
-  en: { invitation: 'INVITATION', confirmed: 'CONFIRMED', pending: 'REQUESTED', when: 'When', where: 'Where', who: 'With', host: 'Hosted by', allDay: 'All day', footer: "Sent by {persona}, {owner}'s AI twin" },
-  hl: { invitation: 'INVITATION', confirmed: 'CONFIRMED', pending: 'REQUESTED', when: 'Kab', where: 'Kahan', who: 'Kiske saath', host: 'Host', allDay: 'Poora din', footer: "{persona} ne bheja, {owner} ka AI twin" },
-  hi: { invitation: 'निमंत्रण', confirmed: 'पक्का', pending: 'अनुरोध', when: 'कब', where: 'कहाँ', who: 'किसके साथ', host: 'मेज़बान', allDay: 'पूरे दिन', footer: '{persona} द्वारा भेजा गया, {owner} का AI ट्विन' },
-  mr: { invitation: 'आमंत्रण', confirmed: 'निश्चित', pending: 'विनंती', when: 'कधी', where: 'कुठे', who: 'कोणासोबत', host: 'यजमान', allDay: 'दिवसभर', footer: '{persona} कडून, {owner} चा AI ट्विन' },
-  gu: { invitation: 'આમંત્રણ', confirmed: 'પાક્કું', pending: 'વિનંતી', when: 'ક્યારે', where: 'ક્યાં', who: 'કોની સાથે', host: 'યજમાન', allDay: 'આખો દિવસ', footer: '{persona} તરફથી, {owner} નો AI ટ્વિન' },
+  en: { invitation: 'INVITATION', confirmed: 'CONFIRMED', pending: 'REQUESTED', when: 'When', what: 'What', how: 'How', where: 'Where', who: 'With', host: 'Hosted by', allDay: 'All day', footer: "Sent by {persona}, {owner}'s AI twin" },
+  hl: { invitation: 'INVITATION', confirmed: 'CONFIRMED', pending: 'REQUESTED', when: 'Kab', what: 'Kis liye', how: 'Kaise', where: 'Kahan', who: 'Kiske saath', host: 'Host', allDay: 'Poora din', footer: "{persona} ne bheja, {owner} ka AI twin" },
+  hi: { invitation: 'निमंत्रण', confirmed: 'पक्का', pending: 'अनुरोध', when: 'कब', what: 'किस लिए', how: 'कैसे', where: 'कहाँ', who: 'किसके साथ', host: 'मेज़बान', allDay: 'पूरे दिन', footer: '{persona} द्वारा भेजा गया, {owner} का AI ट्विन' },
+  mr: { invitation: 'आमंत्रण', confirmed: 'निश्चित', pending: 'विनंती', when: 'कधी', what: 'कशासाठी', how: 'कसे', where: 'कुठे', who: 'कोणासोबत', host: 'यजमान', allDay: 'दिवसभर', footer: '{persona} कडून, {owner} चा AI ट्विन' },
+  gu: { invitation: 'આમંત્રણ', confirmed: 'પાક્કું', pending: 'વિનંતી', when: 'ક્યારે', what: 'શેના માટે', how: 'કેવી રીતે', where: 'ક્યાં', who: 'કોની સાથે', host: 'યજમાન', allDay: 'આખો દિવસ', footer: '{persona} તરફથી, {owner} નો AI ટ્વિન' },
 };
 
 // A to-do/request card reads "TASK" and "Handled by" instead of "INVITATION" and "Hosted by".
@@ -233,6 +243,8 @@ export function invitationData(item, settings, { code = 'en', now = new Date() }
     monthYear: fmt({ month: 'long', year: 'numeric' }),
     time: parts ? (item.allDay ? L.allDay : fmt({ hour: 'numeric', minute: '2-digit', hour12: true })) : '',
     place: item.location || '',
+    topic: item.topic || '',
+    mode: item.mode || '',
     contact: item.contactName || item.phone || '',
     owner,
     persona: settings.personaName || 'eSumit',
@@ -274,12 +286,12 @@ body{font-family:"Noto Sans","Noto Sans Devanagari","Noto Sans Gujarati","Noto C
 .date .num{font-size:176px;line-height:.95;font-weight:800;letter-spacing:-6px;margin-top:6px}
 .date .my{font-size:32px;font-weight:500;color:#55554f;margin-top:8px}
 .date .time{font-size:84px;font-weight:700;letter-spacing:-2px;text-align:right;padding-bottom:8px}
-.rows{margin-top:46px;display:grid;gap:30px}
+.rows{margin-top:36px;display:grid;gap:22px}
 .row{display:flex;align-items:center;gap:26px}
-.ico{flex:none;width:76px;height:76px;border-radius:50%;background:${d.accent}1a;display:flex;align-items:center;justify-content:center}
+.ico{flex:none;width:68px;height:68px;border-radius:50%;background:${d.accent}1a;display:flex;align-items:center;justify-content:center}
 .ico svg{width:36px;height:36px;stroke:${d.accent};fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .k{font-size:22px;font-weight:600;letter-spacing:3px;text-transform:uppercase;color:#8a8a82}
-.v{font-size:40px;font-weight:600;margin-top:4px;overflow-wrap:anywhere}
+.v{font-size:38px;font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:850px}
 .foot{position:absolute;left:72px;right:72px;bottom:56px;border-top:3px dashed #d9d6cd;padding-top:26px;display:flex;justify-content:space-between;align-items:center;font-size:24px;color:#8a8a82}
 .foot b{color:#1d1d1b;font-weight:600}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#b9b6ab;margin:0 12px;vertical-align:middle}
@@ -294,7 +306,8 @@ body{font-family:"Noto Sans","Noto Sans Devanagari","Noto Sans Gujarati","Noto C
 <div class="body">
 ${d.day ? `<div class="date"><div><div class="wd">${escapeHtml(d.weekday)}</div><div class="num">${escapeHtml(d.day)}</div><div class="my">${escapeHtml(d.monthYear)}</div></div><div class="time">${escapeHtml(d.time)}</div></div>` : ''}
 <div class="rows">
-${row(d.labels.where, d.place, '<svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>')}
+${row(d.labels.what, d.topic, '<svg viewBox="0 0 24 24"><path d="M5 4h10l4 4v12H5z"/><path d="M14 4v5h5M8 13h8M8 17h6"/></svg>')}
+${row(d.mode && d.place ? `${d.labels.how} / ${d.labels.where}` : d.mode ? d.labels.how : d.labels.where, [d.mode, d.place].filter(Boolean).join(' · '), '<svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>')}
 ${row(d.labels.who, d.contact, '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14a6 6 0 0 1 3 6"/></svg>')}
 ${row(d.hostLabel, d.owner, '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>')}
 </div></div>

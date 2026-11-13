@@ -94,7 +94,9 @@ export function replyLanguage(text, previous = [], notes = null) {
   let stated = fromChat || fromNotes;
   if (!fromChat && fromNotes && current.code === 'en') {
     const recent = previous.slice(-2).map(detectLanguage);
-    if (recent.length >= 2 && recent.every((l) => l.code === 'en')) stated = null;
+    // a clearly English sentence is answered in English: an old "Prefers Hinglish" note must not turn it into Hinglish
+    const longEnough = (String(text ?? '').match(/[a-z]+/gi) || []).length >= 4;
+    if (longEnough || (recent.length >= 2 && recent.every((l) => l.code === 'en'))) stated = null;
   }
   // Writing in a native script (Devanagari, Tamil…) is itself the strongest signal.
   if (stated && current.script !== 'native') return { ...stated, reason: 'preference' };

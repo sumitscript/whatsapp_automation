@@ -57,24 +57,22 @@ export function createCloudflareClient({ pool, baseUrl = 'https://api.cloudflare
   });
 }
 
-/** Check a Cloudflare key with a one-token completion (costs a fraction of a neuron). { ok, status, ms, error?, note? } */
-export async function probeCloudflare(secret, { baseUrl = 'https://api.cloudflare.com/client/v4', model = CF_DEFAULT_MODEL, fetchImpl, timeoutMs = 15_000 } = {}) {
+/** Check a Cloudflare account id + token by listing one model: costs no neurons and does not depend on which model is chosen. { ok, status, ms, error?, note? } */
+export async function probeCloudflare(secret, { baseUrl = 'https://api.cloudflare.com/client/v4', fetchImpl, timeoutMs = 15_000 } = {}) {
   const f = fetchImpl || ((...a) => fetch(...a));
   const k = parseCloudflareKey(secret);
   if (!k) return { ok: false, status: 0, ms: 0, error: 'The key must look like ACCOUNT_ID:API_TOKEN (the 32-character account id, a colon, then the API token)' };
   const t0 = performance.now();
   try {
-    const res = await f(`${base(secret, baseUrl)}/chat/completions`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${k.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 }),
+    const res = await f(`${String(baseUrl).replace(/\/+$/, '')}/accounts/${k.accountId}/ai/models/search?per_page=1`, {
+      headers: { authorization: `Bearer ${k.token}` },
       signal: AbortSignal.timeout(timeoutMs),
     });
     const ms = Math.round(performance.now() - t0);
     if (res.ok) return { ok: true, status: 200, ms };
     const text = await res.text().catch(() => '');
     if (allowanceUsedUp(res.status, text)) return { ok: true, status: res.status, ms, note: "The key works, but today's free allowance is already used up" };
-    const why = res.status === 401 || res.status === 403 ? 'Cloudflare rejected this token or account id (check the token has the Workers AI permission)' : res.status === 404 ? 'Cloudflare did not find that account id or model' : `Cloudflare answered HTTP ${res.status}`;
+    const why = res.status === 401 || res.status === 403 ? 'Cloudflare rejected this token or account id (check the token has the Workers AI permission)' : res.status === 404 ? 'Cloudflare did not find that account id' : `Cloudflare answered HTTP ${res.status}`;
     return { ok: false, status: res.status, ms, error: why };
   } catch (err) {
     return { ok: false, status: 0, ms: Math.round(performance.now() - t0), error: `Could not reach Cloudflare: ${err.message}` };

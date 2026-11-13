@@ -50,7 +50,7 @@ test('about-me needs a profile topic; "your" means me, "my" means them', () => {
 test('a stated language preference wins over one English message', () => {
   const said = ["I'm Ravi, preparing for backend interviews, i prefer hinglish"];
   assert.equal(replyLanguage('System design', said).code, 'hi-Latn');
-  assert.equal(replyLanguage('Help me to prep', [], '- Name: Ravi\n- Prefers Hinglish').code, 'hi-Latn');
+  assert.equal(replyLanguage('Help me prep', [],'- Name: Ravi\n- Prefers Hinglish').code, 'hi-Latn');
   assert.equal(replyLanguage('नमस्ते आप कैसे हो', said).code, 'hi'); // native script still wins
   assert.equal(statedLanguagePreference(['I use english at work']), null);
   assert.equal(replyLanguage('ok cool', ['bhai kya haal hai', 'acha theek hai yaar']).code, 'hi-Latn');
