@@ -948,13 +948,16 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { box-shadow: 
 
 
 /* ---- AI provider card: segmented mode, account rows, usage bar, limit panel ---- */
-.segmented { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--border); }
-.segmented label { position: relative; cursor: pointer; }
-.segmented input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
-.segmented span { display: block; padding: 6px 14px; border-radius: 8px; font-size: 0.85rem; color: var(--muted); transition: background 0.15s, color 0.15s; white-space: nowrap; }
-.segmented label:hover span { color: var(--text); }
-.segmented input:checked + span { background: var(--accent); color: var(--accent-contrast); font-weight: 600; }
-.segmented input:focus-visible + span { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--border); }
+.seg > label { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 9px 8px; border-radius: 9px; cursor: pointer; text-align: center; transition: background 0.15s; }
+.seg > label > input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; appearance: none; }
+.seg > label > b { font-size: 0.88rem; font-weight: 600; color: var(--text-2); }
+.seg > label > small { font-size: 0.7rem; color: var(--muted); line-height: 1.2; }
+.seg > label:hover { background: var(--panel-3); }
+.seg > label:has(input:checked) { background: var(--accent); }
+.seg > label:has(input:checked) > b { color: var(--accent-contrast); }
+.seg > label:has(input:checked) > small { color: color-mix(in srgb, var(--accent-contrast) 75%, transparent); }
+.seg > label:has(input:focus-visible) { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
 
 .prov-head { display: flex; align-items: center; justify-content: space-between; margin: 18px 0 6px; padding-top: 14px; border-top: 1px solid var(--border); }
 .prov-head h3 { margin: 0; font-size: 0.9rem; font-weight: 600; letter-spacing: 0.01em; }

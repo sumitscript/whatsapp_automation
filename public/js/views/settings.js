@@ -101,10 +101,10 @@ export async function mount(root, { hub }) {
         <section class="card" id="groq-card">
           <h2 class="card-title">AI provider</h2>
           <form id="gq-form" class="stack">
-            <div class="segmented" role="radiogroup" aria-label="AI provider mode">
-              <label title="Cloud first (Groq, then Cloudflare); the local model is the backup"><input type="radio" name="llmProvider" value="auto" /><span>Auto</span></label>
-              <label title="Always the model on this server"><input type="radio" name="llmProvider" value="ollama" /><span>Local</span></label>
-              <label title="Groq, then Cloudflare; never the local model"><input type="radio" name="llmProvider" value="groq" /><span>Cloud only</span></label>
+            <div class="seg" role="radiogroup" aria-label="AI provider mode">
+              <label><input type="radio" name="llmProvider" value="auto" /><b>Auto</b><small>Cloud, local as backup</small></label>
+              <label><input type="radio" name="llmProvider" value="ollama" /><b>Local</b><small>This server only</small></label>
+              <label><input type="radio" name="llmProvider" value="groq" /><b>Cloud only</b><small>Never local</small></label>
             </div>
             <p class="muted small" id="gq-summary">Loading…</p>
           </form>
@@ -135,9 +135,9 @@ export async function mount(root, { hub }) {
                 <input form="gq-form" name="cloudflareModel" list="cf-models" placeholder="@cf/google/gemma-4-26b-a4b-it" autocomplete="off" />
                 <datalist id="cf-models"><option value="@cf/google/gemma-4-26b-a4b-it"></option><option value="@cf/meta/llama-3.1-8b-instruct-fp8"></option><option value="@cf/meta/llama-3.2-3b-instruct"></option></datalist></label>
               <div class="field"><span>Account order</span>
-                <div class="segmented" role="radiogroup" aria-label="Account order">
-                  <label title="Account 1 first, with all its models, then account 2"><input form="gq-form" type="radio" name="groqStrategy" value="priority" /><span>Priority</span></label>
-                  <label title="Accounts take turns"><input form="gq-form" type="radio" name="groqStrategy" value="spread" /><span>Spread</span></label>
+                <div class="seg" role="radiogroup" aria-label="Account order">
+                  <label><input form="gq-form" type="radio" name="groqStrategy" value="priority" /><b>Priority</b><small>Account 1 first</small></label>
+                  <label><input form="gq-form" type="radio" name="groqStrategy" value="spread" /><b>Spread</b><small>Take turns</small></label>
                 </div>
               </div>
               <label class="field"><span>Break message <span class="muted small">({name} {persona} {owner})</span></span>
