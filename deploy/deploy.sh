@@ -69,6 +69,18 @@ step "waiting for gateway health (up to 180 s)"
 for i in $(seq 1 60); do
   if docker compose exec -T gateway curl -fsS http://127.0.0.1:3000/readyz >/dev/null 2>&1; then
     echo "✓ healthy after ~$((i * 3)) s: $APP_IMAGE"
+    # HTTPS check from the server itself: when the proxy has no certificate (handshake error) show why and restart it once.
+    domain="$(env_val DOMAIN)"
+    if [ -n "$domain" ] && [ "${domain#:}" = "$domain" ]; then
+      if ! curl -fsS -m 15 -o /dev/null "https://$domain/readyz" 2>/dev/null; then
+        echo "! HTTPS on $domain is not answering; proxy log:"; docker compose logs --tail=40 caddy 2>&1 | sed 's/^/    /' || true
+        echo "→ restarting the proxy"; docker compose restart caddy >/dev/null 2>&1 || true
+        sleep 25
+        curl -fsS -m 15 -o /dev/null "https://$domain/readyz" 2>/dev/null && echo "✓ HTTPS is back" || { echo "✗ HTTPS still failing; proxy log:"; docker compose logs --tail=40 caddy 2>&1 | sed 's/^/    /' || true; }
+      else
+        echo "✓ HTTPS answers on $domain"
+      fi
+    fi
     # Housekeeping: every deploy leaves the previous image behind. Keep it for 3 days (rollback), drop older unused
     # images, stopped containers and old build cache. Volumes (database, Redis, WhatsApp session, models) are never touched.
     docker image prune -af --filter "until=72h" >/dev/null 2>&1 || true
